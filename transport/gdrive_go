@@ -1,0 +1,213 @@
+package transport
+
+import (
+	"fmt"
+	"io"
+	"io/fs"
+	"net/http"
+
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
+
+	"github.com/code-to-go/safe/safepool/core"
+
+	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
+
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
+	"golang.org/x/oauth2/jwt"
+	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/option"
+)
+
+type ServiceAccountConfig struct {
+	ClientEmail  string
+	PrivateKey   []byte
+	PrivateKeyID string
+	AuthURI      string
+	TokenURI     string
+}
+
+type GDriveConfig struct {
+	ServiceAccount ServiceAccountConfig
+
+	ClientID     string `json:"clientId" yaml:"clientId"`
+	ClientSecret string `json:"clientSecret" yaml:"clientSecret"`
+
+	Password string `json:"password" yaml:"password"`
+	KeyPath  string `json:"keyPath" yaml:"keyPath"`
+	Base     string `json:"base" yaml:"base"`
+}
+
+type GDrive struct {
+	c    *sftp.Client
+	base string
+	url  string
+}
+
+var endpoints = oauth2.Endpoint{
+	AuthURL:  "https://accounts.google.com/o/oauth2/auth",
+	TokenURL: "https://accounts.google.com/o/oauth2/token",
+}
+
+func getJwtConfig(c GDriveConfig, scopes []string) *jwt.Config {
+	cfg := &jwt.Config{
+		Email:        c.ServiceAccount.ClientEmail,
+		PrivateKey:   c.ServiceAccount.PrivateKey,
+		PrivateKeyID: c.ServiceAccount.PrivateKeyID,
+		TokenURL:     f.TokenURL,
+	}
+	if cfg.TokenURL == "" {
+		cfg.TokenURL = JWTTokenURL
+	}
+	return cfg
+}
+
+func getClient(c GDriveConfig) *http.Client {
+	oa := &oauth2.Config{}
+
+	config := &oauth2.Config{
+		ClientID:     c.ClientID,
+		ClientSecret: c.ClientSecret,
+	}
+
+	// The file token.json stores the user's access and refresh tokens, and is
+	// created automatically when the authorization flow completes for the first
+	// time.
+	tokFile := "token.json"
+	tok, err := tokenFromFile(tokFile)
+	if err != nil {
+		tok = getTokenFromWeb(config)
+		saveToken(tokFile, tok)
+	}
+	return config.Client(context.Background(), tok)
+}
+
+func NewGDrive(config GDriveConfig) (Exchanger, error) {
+	addr := config.Addr
+	if !strings.ContainsRune(addr, ':') {
+		addr = fmt.Sprintf("%s:22", addr)
+	}
+
+	var url string
+	var auth []ssh.AuthMethod
+	if config.Password != "" {
+		auth = append(auth, ssh.Password(config.Password))
+		url = fmt.Sprintf("sftp://%s@%s/%s", config.Username, config.Addr, config.Base)
+	}
+	if config.KeyPath != "" {
+		key, err := os.ReadFile(config.KeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("cannot load key file %s: %v", config.KeyPath, err)
+		}
+
+		signer, err := ssh.ParsePrivateKey(key)
+		if err != nil {
+			return nil, fmt.Errorf("invalid key file %s: %v", config.KeyPath, err)
+		}
+		auth = append(auth, ssh.PublicKeys(signer))
+		url = fmt.Sprintf("sftp://!%s@%s/%s", filepath.Base(config.KeyPath), config.Addr, config.Base)
+	}
+	if len(auth) == 0 {
+		return nil, fmt.Errorf("no auth method provided for sftp connection to %s", config.Addr)
+	}
+
+	cc := &ssh.ClientConfig{
+		User: config.Username,
+		Auth: []ssh.AuthMethod{
+			ssh.Password(config.Password),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+
+	client, err := ssh.Dial("tcp", addr, cc)
+	if err != nil {
+		return nil, fmt.Errorf("cannot connect to %s: %v", addr, err)
+	}
+	c, err := sftp.NewClient(client)
+	if err != nil {
+		return nil, fmt.Errorf("cannot create a sftp client for %s: %v", addr, err)
+	}
+
+	base := config.Base
+	if base == "" {
+		base = "/"
+	}
+	return &GDrive{c, base, url}, nil
+}
+
+func (g *GDrive) Read(name string, rang *Range, dest io.Writer) error {
+	f, err := g.c.Open(path.Join(g.base, name))
+	if core.IsErr(err, "cannot open file on sftp server %v:%v", g) {
+		return err
+	}
+
+	if rang == nil {
+		_, err = io.Copy(dest, f)
+	} else {
+		left := rang.To - rang.From
+		f.Seek(rang.From, 0)
+		var b [4096]byte
+
+		for left > 0 && err == nil {
+			var sz int64
+			if rang.From-rang.To > 4096 {
+				sz = 4096
+			} else {
+				sz = rang.From - rang.To
+			}
+			_, err = f.Read(b[0:sz])
+			dest.Write(b[0:sz])
+			left -= sz
+		}
+	}
+	if core.IsErr(err, "cannot read from %s/%s:%v", g, name) {
+		return err
+	}
+
+	return nil
+}
+
+func (s *GDrive) Write(name string, source io.Reader) error {
+	return nil
+}
+
+func (s *GDrive) ReadDir(prefix string, opts ListOption) ([]fs.FileInfo, error) {
+	dir, prefix := path.Split(prefix)
+	result, err := s.c.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	var infos []fs.FileInfo
+	for _, item := range result {
+		if strings.HasPrefix(item.Name(), prefix) {
+			infos = append(infos, item)
+		}
+	}
+
+	return infos, nil
+}
+
+func (s *GDrive) Stat(name string) (os.FileInfo, error) {
+	return s.c.Stat(path.Join(s.base, name))
+}
+
+func (s *GDrive) Rename(old, new string) error {
+	return s.c.Rename(path.Join(s.base, old), path.Join(s.base, new))
+}
+
+func (s *GDrive) Delete(name string) error {
+	return s.c.Remove(path.Join(s.base, name))
+}
+
+func (s *GDrive) Close() error {
+	return s.c.Close()
+}
+
+func (s *GDrive) String() string {
+	return s.url
+}
