@@ -83,25 +83,25 @@ func createPool(config *C.char, apps *C.char) C.Result {
 		return cResult(nil, err)
 	}
 
-	err = safepool.CreatePool(c, apps_)
+	err = CreatePool(c, apps_)
 	return cResult(nil, err)
 }
 
 //export addPool
 func addPool(token *C.char) C.Result {
-	c, err := safepool.AddPool(C.GoString(token))
+	c, err := AddPool(C.GoString(token))
 	return cResult(c, err)
 }
 
 //export getPool
 func getPool(name *C.char) C.Result {
-	p, err := safepool.GetPool(C.GoString(name))
+	p, err := GetPool(C.GoString(name))
 	return cResult(p, err)
 }
 
 //export getMessages
 func getMessages(poolName *C.char, afterIdS, beforeIdS C.long, limit C.int) C.Result {
-	messages, err := safepool.GetMessages(C.GoString(poolName), uint64(afterIdS),
+	messages, err := GetMessages(C.GoString(poolName), uint64(afterIdS),
 		uint64(int64(beforeIdS)), int(limit))
 	return cResult(messages, err)
 }
@@ -113,7 +113,7 @@ func postMessage(poolName *C.char, contentType *C.char, text *C.char, binary *C.
 		return cResult(nil, err)
 	}
 
-	id, err := safepool.PostMessage(C.GoString(poolName), C.GoString(contentType),
+	id, err := PostMessage(C.GoString(poolName), C.GoString(contentType),
 		C.GoString(text), bs)
 	if core.IsErr(err, "cannot post message: %v") {
 		return cResult(nil, err)
