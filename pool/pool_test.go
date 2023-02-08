@@ -9,9 +9,9 @@ import (
 
 	"github.com/adrg/xdg"
 
-	"github.com/code-to-go/safe/safepool/core"
-	"github.com/code-to-go/safe/safepool/security"
-	"github.com/code-to-go/safe/safepool/sql"
+	"github.com/code-to-go/safepool/core"
+	"github.com/code-to-go/safepool/security"
+	"github.com/code-to-go/safepool/sql"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"

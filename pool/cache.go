@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/adrg/xdg"
-	"github.com/code-to-go/safe/safepool/core"
-	"github.com/code-to-go/safe/safepool/transport"
+	"github.com/code-to-go/safepool/core"
+	"github.com/code-to-go/safepool/transport"
 )
 
 var CachePath string

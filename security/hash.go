@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/code-to-go/safe/safepool/core"
+	"github.com/code-to-go/safepool/core"
 
 	"golang.org/x/crypto/blake2b"
 )

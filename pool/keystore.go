@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/code-to-go/safe/safepool/core"
-	"github.com/code-to-go/safe/safepool/security"
+	"github.com/code-to-go/safepool/core"
+	"github.com/code-to-go/safepool/security"
 
 	"github.com/patrickmn/go-cache"
 )

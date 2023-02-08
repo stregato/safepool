@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/code-to-go/safe/safepool/core"
+	"github.com/code-to-go/safepool/core"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"

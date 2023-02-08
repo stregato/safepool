@@ -1,8 +1,8 @@
 package security
 
 import (
-	"github.com/code-to-go/safe/safepool/core"
-	"github.com/code-to-go/safe/safepool/sql"
+	"github.com/code-to-go/safepool/core"
+	"github.com/code-to-go/safepool/sql"
 )
 
 func sqlSetIdentity(i Identity) error {

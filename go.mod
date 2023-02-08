@@ -1,4 +1,4 @@
-module github.com/code-to-go/safe
+module github.com/code-to-go/safepool
 
 go 1.19
 
@@ -7,7 +7,6 @@ require (
 	github.com/aws/aws-sdk-go v1.44.197
 	github.com/beevik/ntp v0.3.0
 	github.com/chmduquesne/rollinghash v4.0.0+incompatible
-	github.com/code-to-go/safe/safepool v0.0.0-20230208192031-cba2ebfa373d
 	github.com/ecies/go/v2 v2.0.4
 	github.com/godruoyi/go-snowflake v0.0.2
 	github.com/google/uuid v1.3.0

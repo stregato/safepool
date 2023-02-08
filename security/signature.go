@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"strings"
 
-	"github.com/code-to-go/safe/safepool/core"
+	"github.com/code-to-go/safepool/core"
 )
 
 type PublicKey ed25519.PublicKey

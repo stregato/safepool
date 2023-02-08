@@ -7,9 +7,9 @@ import (
 	"path"
 	"time"
 
-	"github.com/code-to-go/safe/safepool/core"
-	"github.com/code-to-go/safe/safepool/security"
-	"github.com/code-to-go/safe/safepool/transport"
+	"github.com/code-to-go/safepool/core"
+	"github.com/code-to-go/safepool/security"
+	"github.com/code-to-go/safepool/transport"
 	"github.com/godruoyi/go-snowflake"
 )
 

@@ -3,8 +3,8 @@ package chat
 import (
 	"encoding/json"
 
-	"github.com/code-to-go/safe/safepool/core"
-	"github.com/code-to-go/safe/safepool/sql"
+	"github.com/code-to-go/safepool/core"
+	"github.com/code-to-go/safepool/sql"
 )
 
 func sqlSetMessage(pool string, id uint64, author string, m Message, offset int) error {

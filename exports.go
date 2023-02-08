@@ -17,8 +17,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 
-	"github.com/code-to-go/safe/safepool/core"
-	"github.com/code-to-go/safe/safepool/pool"
+	"github.com/code-to-go/safepool/core"
+	"github.com/code-to-go/safepool/pool"
 )
 
 func cResult(v any, err error) C.Result {
@@ -49,7 +49,7 @@ func cInput(err error, i *C.char, v any) error {
 //export start
 func start(dbPath *C.char) C.Result {
 	p := C.GoString(dbPath)
-	return cResult(nil, safepool.Start(p))
+	return cResult(nil, Start(p))
 }
 
 //export stop
@@ -59,12 +59,12 @@ func stop() C.Result {
 
 //export getSelfId
 func getSelfId() C.Result {
-	return cResult(safepool.Self.Id(), nil)
+	return cResult(Self.Id(), nil)
 }
 
 //export getSelf
 func getSelf() C.Result {
-	return cResult(safepool.Self, nil)
+	return cResult(Self, nil)
 }
 
 //export getPoolList

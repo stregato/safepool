@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 
-	"github.com/code-to-go/safe/safepool/core"
-	"github.com/code-to-go/safe/safepool/security"
+	"github.com/code-to-go/safepool/core"
+	"github.com/code-to-go/safepool/security"
 )
 
 // func (p *Pool) list(prefix string, offset int) ([]Head, error) {

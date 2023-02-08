@@ -3,7 +3,7 @@ package pool
 import (
 	"sync"
 
-	"github.com/code-to-go/safe/safepool/transport"
+	"github.com/code-to-go/safepool/transport"
 )
 
 var Connections = map[string]transport.Exchanger{}

@@ -3,9 +3,9 @@ package pool
 import (
 	"encoding/json"
 
-	"github.com/code-to-go/safe/safepool/core"
-	"github.com/code-to-go/safe/safepool/security"
-	"github.com/code-to-go/safe/safepool/sql"
+	"github.com/code-to-go/safepool/core"
+	"github.com/code-to-go/safepool/security"
+	"github.com/code-to-go/safepool/sql"
 )
 
 func sqlGetFeeds(pool string, offset int) ([]Feed, error) {

@@ -10,7 +10,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/code-to-go/safe/safepool/core"
+	"github.com/code-to-go/safepool/core"
 
 	"github.com/zenazn/pkcs7pad"
 )

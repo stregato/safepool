@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/code-to-go/safe/safepool/core"
+	"github.com/code-to-go/safepool/core"
 )
 
 const FeedsFolder = "feeds"
