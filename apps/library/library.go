@@ -42,7 +42,7 @@ type File struct {
 	Hash        []byte    `json:"hash"`
 	HashChain   [][]byte  `json:"hashChain"`
 	Tags        []string  `json:"tags"`
-	Offset      int
+	CTime       int64
 }
 
 type Local struct {
@@ -207,7 +207,7 @@ func (l *Library) getDocuments(files []File, locals []Local) ([]Document, error)
 
 // List returns the documents in provided folder
 func (l *Library) List(folder string) (List, error) {
-	hs, _ := l.Pool.List(sqlGetOffset(l.Pool.Name, l.Channel))
+	hs, _ := l.Pool.List(sqlGetCTime(l.Pool.Name, l.Channel))
 	for _, h := range hs {
 		l.accept(h)
 	}
@@ -395,7 +395,7 @@ func (l *Library) accept(feed pool.Feed) {
 		Size:        uint64(feed.Size),
 		AuthorId:    feed.AuthorId,
 		ContentType: m.ContentType,
-		Offset:      feed.Offset,
+		CTime:       feed.CTime,
 		Hash:        feed.Hash,
 		HashChain:   m.HashChain,
 	}

@@ -21,13 +21,13 @@ import (
 const SafeConfigFile = ".safepool-pool.json"
 
 var ErrNoExchange = errors.New("no Exchange available")
-var ErrInvalidSignature = errors.New("signature is invalid")
 var ErrNotTrusted = errors.New("the author is not a trusted user")
 var ErrNotAuthorized = errors.New("no authorization for this file")
 var ErrAlreadyExist = errors.New("pool already exists")
 var ErrInvalidToken = errors.New("provided token is invalid: missing name or configs")
 var ErrInvalidId = errors.New("provided id not a valid ed25519 public key")
 var ErrInvalidConfig = errors.New("provided config is invalid: missing name or configs")
+var ErrInvalidName = errors.New("provided pool has invalid name")
 
 type Consumer interface {
 	TimeOffset(s *Pool) time.Time
@@ -47,9 +47,8 @@ type Pool struct {
 	lastHouseKeeping time.Time
 	accessHash       []byte
 	config           Config
-	// houseKeeping     *time.Ticker
+	ctime            int64
 	houseKeepingLock sync.Mutex
-	// stopHouseKeeping chan bool
 }
 
 type Identity struct {
@@ -69,7 +68,7 @@ type Feed struct {
 	AuthorId  string
 	Signature []byte
 	Meta      []byte
-	Offset    int    `json:"-"`
+	CTime     int64  `json:"-"`
 	Slot      string `json:"-"`
 }
 
@@ -84,9 +83,9 @@ var CacheSizeMB = 16
 var FeedDateFormat = "20060102"
 
 type Config struct {
-	Name    string
-	Public  []string
-	Private []string
+	Name    string   `json:"name"`
+	Public  []string `json:"public"`
+	Private []string `json:"private"`
 }
 
 func List() []string {
@@ -94,6 +93,7 @@ func List() []string {
 	return names
 }
 
+// Create creates a new pool on the defined exchanges
 func Create(self security.Identity, name string, apps []string) (*Pool, error) {
 	config, err := sqlGetPool(name)
 	if core.IsErr(err, "unknown pool %s: %v", name) {
@@ -109,6 +109,12 @@ func Create(self security.Identity, name string, apps []string) (*Pool, error) {
 	err = p.connectSafe(config)
 	if err != nil {
 		return nil, err
+	}
+	if !ForceCreation {
+		_, err = p.e.Stat(path.Join(p.Name, ".access"))
+		if err == nil {
+			return nil, ErrAlreadyExist
+		}
 	}
 
 	p.masterKeyId = snowflake.ID()
@@ -128,13 +134,6 @@ func Create(self security.Identity, name string, apps []string) (*Pool, error) {
 		return nil, err
 	}
 
-	if !ForceCreation {
-		_, err = p.e.Stat(path.Join(p.Name, ".access"))
-		if err == nil {
-			return nil, ErrAlreadyExist
-		}
-	}
-
 	err = p.syncIdentities()
 	if core.IsErr(err, "cannot sync own identity: %v") {
 		return nil, err
@@ -145,6 +144,7 @@ func Create(self security.Identity, name string, apps []string) (*Pool, error) {
 		return nil, err
 	}
 
+	p.replica()
 	return p, err
 }
 
@@ -179,8 +179,8 @@ type AcceptFunc func(feed Feed)
 
 const All = ""
 
-func (p *Pool) List(offset int) ([]Feed, error) {
-	hs, err := sqlGetFeeds(p.Name, offset)
+func (p *Pool) List(ctime int64) ([]Feed, error) {
+	hs, err := sqlGetFeeds(p.Name, ctime)
 	if core.IsErr(err, "cannot read Pool feeds: %v") {
 		return nil, err
 	}
@@ -211,6 +211,7 @@ func (p *Pool) Send(name string, r io.Reader, meta []byte) (Feed, error) {
 		Signature: signature,
 		Meta:      meta,
 		Slot:      slot,
+		CTime:     core.Now().Unix(),
 	}
 	data, err := json.Marshal(f)
 	if core.IsErr(err, "cannot marshal header to json: %v") {
@@ -247,16 +248,16 @@ func (p *Pool) Receive(id uint64, rang *transport.Range, w io.Writer) error {
 	}
 	hash := hr.Hash()
 	if !bytes.Equal(hash, f.Hash) {
-		return ErrInvalidSignature
+		return security.ErrInvalidSignature
 	}
 
 	return nil
 }
 
-func (p *Pool) CreateBranch(sub string, ids []string, apps []string) (Config, error) {
+func (p *Pool) Sub(sub string, ids []string, apps []string) (Config, error) {
 	var name string
 	parts := strings.Split(p.Name, "/")
-	if len(parts) > 2 && parts[len(parts)-2] == "branches" {
+	if len(parts) > 2 && parts[len(parts)-2] == "subs" {
 		name = fmt.Sprintf("%s/%s", strings.Join(parts[0:len(parts)-2], "/"), sub)
 	} else {
 		name = fmt.Sprintf("%s/branches/%s", p.Name, sub)
@@ -341,4 +342,18 @@ func (p *Pool) SetAccess(userId string, state State) error {
 
 func (p *Pool) ToString() string {
 	return fmt.Sprintf("%s [%v]", p.Name, p.e)
+}
+
+var ctimeLock sync.Mutex
+
+func (p *Pool) getCTime() int64 {
+	var ctime int64
+
+	ctimeLock.Lock()
+	for ctime <= p.ctime {
+		ctime = time.Now().UnixMicro()
+	}
+	p.ctime = ctime
+	ctimeLock.Unlock()
+	return ctime
 }

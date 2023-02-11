@@ -38,54 +38,54 @@ func getHash(m *Message) []byte {
 }
 
 type Chat struct {
-	Pool    *pool.Pool
-	Channel string
+	Pool *pool.Pool
+	Name string
 }
 
-func Get(p *pool.Pool, channel string) Chat {
+func Get(p *pool.Pool, name string) Chat {
 	return Chat{
-		Pool:    p,
-		Channel: channel,
+		Pool: p,
+		Name: name,
 	}
 }
 
-func (c *Chat) TimeOffset(s *pool.Pool) int {
-	return sqlGetOffset(s.Name)
+func (c *Chat) TimeOffset(s *pool.Pool) int64 {
+	return sqlGetCTime(s.Name)
 }
 
-func (c *Chat) Accept(s *pool.Pool, feed pool.Feed) bool {
-	name := feed.Name
-	if !strings.HasPrefix(name, "/chat/") || !strings.HasSuffix(name, ".chat") || feed.Size > 10*1024*1024 {
-		return false
-	}
-	name = path.Base(name)
-	id, err := strconv.ParseInt(name[0:len(name)-5], 10, 64)
-	if err != nil {
-		return false
-	}
+// func (c *Chat) Accept(s *pool.Pool, feed pool.Feed) bool {
+// 	name := feed.Name
+// 	if !strings.HasPrefix(name, "/chat/") || !strings.HasSuffix(name, ".chat") || feed.Size > 10*1024*1024 {
+// 		return false
+// 	}
+// 	name = path.Base(name)
+// 	id, err := strconv.ParseInt(name[0:len(name)-5], 10, 64)
+// 	if err != nil {
+// 		return false
+// 	}
 
-	buf := bytes.Buffer{}
-	err = s.Receive(feed.Id, nil, &buf)
-	if core.IsErr(err, "cannot read %s from %s: %v", feed.Name, s.Name) {
-		return true
-	}
+// 	buf := bytes.Buffer{}
+// 	err = s.Receive(feed.Id, nil, &buf)
+// 	if core.IsErr(err, "cannot read %s from %s: %v", feed.Name, s.Name) {
+// 		return true
+// 	}
 
-	var m Message
-	err = json.Unmarshal(buf.Bytes(), &m)
-	if core.IsErr(err, "invalid chat message %s: %v", feed.Name) {
-		return true
-	}
+// 	var m Message
+// 	err = json.Unmarshal(buf.Bytes(), &m)
+// 	if core.IsErr(err, "invalid chat message %s: %v", feed.Name) {
+// 		return true
+// 	}
 
-	h := getHash(&m)
-	if !security.Verify(m.Author, h, m.Signature) {
-		logrus.Error("message %s has invalid signature", feed.Name)
-		return true
-	}
+// 	h := getHash(&m)
+// 	if !security.Verify(m.Author, h, m.Signature) {
+// 		logrus.Error("message %s has invalid signature", feed.Name)
+// 		return true
+// 	}
 
-	err = sqlSetMessage(s.Name, uint64(id), m.Author, m, feed.Offset)
-	core.IsErr(err, "cannot write message %s to db:%v", feed.Name)
-	return true
-}
+// 	err = sqlSetMessage(s.Name, uint64(id), m.Author, m, feed.CTime)
+// 	core.IsErr(err, "cannot write message %s to db:%v", feed.Name)
+// 	return true
+// }
 
 func (c *Chat) SendMessage(contentType string, text string, binary []byte) (uint64, error) {
 	m := Message{
@@ -109,7 +109,7 @@ func (c *Chat) SendMessage(contentType string, text string, binary []byte) (uint
 	}
 
 	go func() {
-		name := fmt.Sprintf("%s/%d.chat", c.Channel, m.Id)
+		name := fmt.Sprintf("%s/%d.chat", c.Name, m.Id)
 		_, err = c.Pool.Send(name, bytes.NewBuffer(data), nil)
 		core.IsErr(err, "cannot write chat message: %v")
 	}()
@@ -120,7 +120,7 @@ func (c *Chat) SendMessage(contentType string, text string, binary []byte) (uint
 
 func (c *Chat) accept(h pool.Feed) {
 	name := h.Name
-	if !strings.HasPrefix(name, c.Channel) || !strings.HasSuffix(name, ".chat") || h.Size > 10*1024*1024 {
+	if !strings.HasPrefix(name, c.Name) || !strings.HasSuffix(name, ".chat") || h.Size > 10*1024*1024 {
 		return
 	}
 	name = path.Base(name)
@@ -147,13 +147,13 @@ func (c *Chat) accept(h pool.Feed) {
 		return
 	}
 
-	err = sqlSetMessage(c.Pool.Name, uint64(id), m.Author, m, h.Offset)
+	err = sqlSetMessage(c.Pool.Name, uint64(id), m.Author, m, h.CTime)
 	core.IsErr(err, "cannot write message %s to db:%v", h.Name)
 }
 
 func (c *Chat) GetMessages(afterId, beforeId uint64, limit int) ([]Message, error) {
 	c.Pool.Sync()
-	hs, err := c.Pool.List(sqlGetOffset(c.Pool.Name))
+	hs, err := c.Pool.List(sqlGetCTime(c.Pool.Name))
 	if core.IsErr(err, "cannot retrieve messages from pool: %v") {
 		return nil, err
 	}

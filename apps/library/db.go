@@ -16,7 +16,7 @@ func sqlSetDocument(pool string, base string, d File) error {
 	_, err := sql.Exec("SET_LIBRARY_FILE", sql.Args{"pool": pool, "base": base, "id": d.Id, "name": d.Name,
 		"authorId": d.AuthorId, "modTime": sql.EncodeTime(d.ModTime), "size": d.Size,
 		"contentType": d.ContentType, "hash": sql.EncodeBase64(d.Hash), "hashChain": hashChain,
-		"offset": d.Offset, "folder": folder, "level": level})
+		"offset": d.CTime, "folder": folder, "level": level})
 	if core.IsErr(err, "cannot set document %d on db: %v", d.Name) {
 		return err
 	}
@@ -31,7 +31,7 @@ func sqlGetDocumentByArgs(key string, args sql.Args) (File, bool, error) {
 	var modTime int64
 
 	err := sql.QueryRow(key, args,
-		&d.Name, &d.AuthorId, &modTime, &d.Id, &d.Size, &d.ContentType, &hash, &hashChain, &d.Offset)
+		&d.Name, &d.AuthorId, &modTime, &d.Id, &d.Size, &d.ContentType, &hash, &hashChain, &d.CTime)
 	if err == sql.ErrNoRows {
 		return File{}, false, nil
 	} else if core.IsErr(err, "cannot get %s file %v from DB: %v", key, args) {
@@ -92,7 +92,7 @@ func sqlFilesInFolder(pool string, base string, folder string) ([]File, error) {
 		var hashChain []byte
 		var modTime int64
 
-		err = rows.Scan(&d.Name, &d.AuthorId, &modTime, &d.Id, &d.Size, &d.ContentType, &hash, &hashChain, &d.Offset)
+		err = rows.Scan(&d.Name, &d.AuthorId, &modTime, &d.Id, &d.Size, &d.ContentType, &hash, &hashChain, &d.CTime)
 		if !core.IsErr(err, "cannot scan row in Files: %v", err) {
 			d.Hash = sql.DecodeBase64(hash)
 			json.Unmarshal(hashChain, &d.HashChain)
@@ -103,11 +103,11 @@ func sqlFilesInFolder(pool string, base string, folder string) ([]File, error) {
 	return documents, nil
 }
 
-func sqlGetOffset(pool string, base string) int {
-	var offset int
-	err := sql.QueryRow("GET_LIBRARY_FILES_OFFSET", sql.Args{"pool": pool, "base": base}, &offset)
+func sqlGetCTime(pool string, base string) int64 {
+	var ctime int64
+	err := sql.QueryRow("GET_LIBRARY_FILES_CTIME", sql.Args{"pool": pool, "base": base}, &ctime)
 	if err == nil {
-		return offset
+		return ctime
 	} else {
 		return -1
 	}

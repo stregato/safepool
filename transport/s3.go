@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -12,76 +13,27 @@ import (
 
 	"github.com/code-to-go/safepool/core"
 
-	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"github.com/aws/smithy-go/logging"
+
 	"github.com/sirupsen/logrus"
 )
 
-type S3Config struct {
-	Region     string `json:"region" yaml:"region"`
-	Endpoint   string `json:"endpoint" yaml:"endpoint"`
-	Bucket     string `json:"bucket" yaml:"bucket"`
-	AccessKey  string `json:"accessKey" yaml:"accessKey"`
-	Secret     string `json:"secret" yaml:"secret"`
-	DisableSSL bool   `json:"disableSSL" yaml:"disableSSL"`
-}
-
 type S3 struct {
-	uploader *s3manager.Uploader
-	svc      *s3.S3
-	bucket   string
-	url      string
-	touch    map[string]time.Time
+	client *s3.Client
+	bucket string
+	url    string
+	touch  map[string]time.Time
 }
 
-func ParseS3Url(s string) (S3Config, error) {
-	u, err := url.Parse(s)
-	if err != nil {
-		return S3Config{}, err
-	}
+type s3logger struct{}
 
-	password, _ := u.User.Password()
-	return S3Config{
-		Bucket:    u.Path,
-		AccessKey: u.User.Username(),
-		Secret:    password,
-	}, nil
-}
-
-func S3ToUrl(c S3Config) string {
-	return fmt.Sprintf("s3://%s@%s/%s#region-%s", c.AccessKey, c.Endpoint, c.Bucket, c.Region)
-}
-
-func getAWSConfig(u *url.URL) *aws.Config {
-
-	accessKey := u.User.Username()
-	secret, hasSecret := u.User.Password()
-	params := u.Query()
-
-	s3c := aws.Config{}
-	if params.Has("region") {
-		s3c.Region = aws.String(params.Get("region"))
-	}
-
-	if accessKey != "" && hasSecret {
-		s3c.Credentials = credentials.NewStaticCredentials(
-			accessKey,
-			secret,
-			"",
-		)
-	}
-	if u.Host != "" {
-		s3c.Endpoint = aws.String(u.Host)
-	}
-	if params.Has("disableSSL") {
-		s3c.DisableSSL = aws.Bool(true)
-	}
-
-	return &s3c
+func (l s3logger) Logf(classification logging.Classification, format string, v ...interface{}) {
+	fmt.Printf(format, v...)
 }
 
 func NewS3(connectionUrl string) (Exchanger, error) {
@@ -90,44 +42,72 @@ func NewS3(connectionUrl string) (Exchanger, error) {
 		return nil, err
 	}
 
-	repr := fmt.Sprintf("s3://%s@%s/%s", u.User, u.Host, u.Path)
-	sess, err := session.NewSession(getAWSConfig(u))
-	if core.IsErr(err, "cannot create S3 session for %s:%v", repr) {
+	r2Resolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+		return aws.Endpoint{
+			URL: fmt.Sprintf("https://%s", u.Host),
+		}, nil
+	})
+
+	q := u.Query()
+	verbose := q.Get("verbose")
+	accessKey := q.Get("accessKey")
+	secret := q.Get("secret")
+	bucket := strings.Trim(u.Path, "/")
+	repr := fmt.Sprintf("s3://%s/%s?accessKey=%s", u.Host, bucket, accessKey)
+
+	options := []func(*config.LoadOptions) error{
+		config.WithEndpointResolverWithOptions(r2Resolver),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secret, "")),
+	}
+	switch verbose {
+	case "1":
+		options = append(options,
+			config.WithLogger(s3logger{}),
+			config.WithClientLogMode(aws.LogRequest|aws.LogResponse),
+		)
+	case "2":
+		options = append(options,
+			config.WithLogger(s3logger{}),
+			config.WithClientLogMode(aws.LogRequestWithBody|aws.LogResponseWithBody),
+		)
+	}
+
+	cfg, err := config.LoadDefaultConfig(context.TODO(), options...)
+	if core.IsErr(err, "cannot create S3 config for %s:%v", repr) {
 		return nil, err
 	}
 
 	s := &S3{
-		uploader: s3manager.NewUploader(sess),
-		svc:      s3.New(sess),
-		url:      repr,
-		bucket:   u.Path,
-		touch:    map[string]time.Time{},
+		client: s3.NewFromConfig(cfg),
+		url:    repr,
+		bucket: bucket,
+		touch:  map[string]time.Time{},
 	}
+
 	err = s.createBucketIfNeeded()
+
 	return s, err
 }
 
 func (s *S3) createBucketIfNeeded() error {
-	_, err := s.svc.HeadBucket(&s3.HeadBucketInput{
+	_, err := s.client.HeadBucket(context.TODO(), &s3.HeadBucketInput{
 		Bucket: aws.String(s.bucket),
 	})
 	if err == nil {
-		return err
+		return nil
 	}
 
-	_, err = s.svc.CreateBucket(&s3.CreateBucketInput{
+	_, err = s.client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
 		Bucket: aws.String(s.bucket),
 	})
-	if err != nil {
-		logrus.Errorf("cannot create bucket %s: %v", s.bucket, err)
-	}
+	core.IsErr(err, "cannot create bucket %s: %v", s.bucket)
 
 	return err
 }
 
 func (s *S3) Touched(name string) bool {
 	touchFile := fmt.Sprintf("%s.touch", name)
-	h, err := s.svc.HeadObject(&s3.HeadObjectInput{
+	h, err := s.client.HeadObject(context.TODO(), &s3.HeadObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(touchFile),
 	})
@@ -149,12 +129,11 @@ func (s *S3) Read(name string, rang *Range, dest io.Writer) error {
 		r = aws.String(fmt.Sprintf("byte%d-%d", rang.From, rang.To))
 	}
 
-	rawObject, err := s.svc.GetObject(
-		&s3.GetObjectInput{
-			Bucket: &s.bucket,
-			Key:    &name,
-			Range:  r,
-		})
+	rawObject, err := s.client.GetObject(context.TODO(), &s3.GetObjectInput{
+		Bucket: &s.bucket,
+		Key:    &name,
+		Range:  r,
+	})
 	if err != nil {
 		logrus.Errorf("cannot read %s/%s: %v", s, name, err)
 		return err
@@ -170,14 +149,12 @@ func (s *S3) Read(name string, rang *Range, dest io.Writer) error {
 
 func (s *S3) Write(name string, source io.Reader) error {
 
-	_, err := s.uploader.Upload(&s3manager.UploadInput{
+	_, err := s.client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket: &s.bucket,
 		Key:    &name,
 		Body:   source,
 	})
-	if err != nil {
-		logrus.Errorf("cannot write %s/%s: %v", s.String(), name, err)
-	}
+	core.IsErr(err, "cannot write %s/%s: %v", s, name)
 	return err
 }
 
@@ -188,7 +165,7 @@ func (s *S3) ReadDir(dir string, opts ListOption) ([]fs.FileInfo, error) {
 		Delimiter: aws.String("/"),
 	}
 
-	result, err := s.svc.ListObjects(input)
+	result, err := s.client.ListObjects(context.TODO(), input)
 	if err != nil {
 		logrus.Errorf("cannot list %s/%s: %v", s.String(), dir, err)
 		return nil, err
@@ -201,7 +178,7 @@ func (s *S3) ReadDir(dir string, opts ListOption) ([]fs.FileInfo, error) {
 
 		infos = append(infos, simpleFileInfo{
 			name:    name,
-			size:    *item.Size,
+			size:    item.Size,
 			isDir:   false,
 			modTime: *item.LastModified,
 		})
@@ -212,7 +189,7 @@ func (s *S3) ReadDir(dir string, opts ListOption) ([]fs.FileInfo, error) {
 }
 
 func (s *S3) Stat(name string) (fs.FileInfo, error) {
-	feed, err := s.svc.HeadObject(&s3.HeadObjectInput{
+	feed, err := s.client.HeadObject(context.TODO(), &s3.HeadObjectInput{
 		Bucket: &s.bucket,
 		Key:    &name,
 	})
@@ -230,14 +207,14 @@ func (s *S3) Stat(name string) (fs.FileInfo, error) {
 
 	return simpleFileInfo{
 		name:    path.Base(name),
-		size:    *feed.ContentLength,
+		size:    feed.ContentLength,
 		isDir:   strings.HasSuffix(name, "/"),
 		modTime: *feed.LastModified,
 	}, nil
 }
 
 func (s *S3) Rename(old, new string) error {
-	_, err := s.svc.CopyObject(&s3.CopyObjectInput{
+	_, err := s.client.CopyObject(context.TODO(), &s3.CopyObjectInput{
 		Bucket:     &s.bucket,
 		CopySource: aws.String(url.QueryEscape(old)),
 		Key:        aws.String(new),
@@ -252,10 +229,10 @@ func (s *S3) Delete(name string) error {
 		Delimiter: aws.String("/"),
 	}
 
-	result, err := s.svc.ListObjects(input)
+	result, err := s.client.ListObjects(context.TODO(), input)
 	if err == nil && len(result.Contents) > 0 {
 		for _, item := range result.Contents {
-			_, err = s.svc.DeleteObject(&s3.DeleteObjectInput{
+			_, err = s.client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
 				Bucket: &s.bucket,
 				Key:    item.Key,
 			})
@@ -264,7 +241,7 @@ func (s *S3) Delete(name string) error {
 			}
 		}
 	} else {
-		_, err = s.svc.DeleteObject(&s3.DeleteObjectInput{
+		_, err = s.client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
 			Bucket: &s.bucket,
 			Key:    &name,
 		})

@@ -31,9 +31,9 @@ func (p *Pool) getSlots() ([]string, error) {
 	return slots, nil
 }
 
-func (p *Pool) Sync() error {
+func (p *Pool) Sync() ([]Feed, error) {
 	if !p.e.Touched(p.Name + "/") {
-		return nil
+		return nil, nil
 	}
 	hs, _ := p.List(0)
 
@@ -44,7 +44,7 @@ func (p *Pool) Sync() error {
 
 	slots, err := p.getSlots()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	thresold := p.BaseId()
@@ -77,6 +77,7 @@ func (p *Pool) Sync() error {
 				continue
 			}
 			f.Slot = slot
+			f.CTime = p.getCTime()
 			_ = sqlAddFeed(p.Name, f)
 			hs = append(hs, f)
 		}
@@ -88,5 +89,5 @@ func (p *Pool) Sync() error {
 		p.replica()
 		p.lastHouseKeeping = core.Now()
 	}
-	return nil
+	return hs, nil
 }

@@ -141,8 +141,8 @@ func (p *Pool) readIdentity(name string) (security.Identity, error) {
 
 	parts := bytes.Split(buf.Bytes(), []byte{0})
 	if len(parts) != 2 {
-		core.IsErr(ErrInvalidSignature, "identity file '%s' has no null separator: %v", name)
-		return identity, ErrInvalidSignature
+		core.IsErr(security.ErrInvalidSignature, "identity file '%s' has no null separator: %v", name)
+		return identity, security.ErrInvalidSignature
 	}
 
 	err = yaml.Unmarshal(parts[0], &identity)
@@ -151,8 +151,8 @@ func (p *Pool) readIdentity(name string) (security.Identity, error) {
 	}
 
 	if !security.Verify(identity.Id(), parts[0], parts[1]) {
-		core.IsErr(ErrInvalidSignature, "invalide signature in '%s': %v", name)
-		return identity, ErrInvalidSignature
+		core.IsErr(security.ErrInvalidSignature, "invalide signature in '%s': %v", name)
+		return identity, security.ErrInvalidSignature
 	}
 	return identity, nil
 }

@@ -1,19 +1,19 @@
-package main
+package api
 
 import (
 	_ "embed"
-	"encoding/base64"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/code-to-go/safepool/apps/chat"
+	"github.com/code-to-go/safepool/apps/registry"
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/pool"
 	"github.com/code-to-go/safepool/security"
 	"github.com/code-to-go/safepool/sql"
 	"github.com/patrickmn/go-cache"
-	"gopkg.in/yaml.v3"
 )
 
 var Apps = []string{
@@ -104,35 +104,31 @@ func CreatePool(c pool.Config, apps []string) error {
 	return nil
 }
 
-func AddPool(token string) (pool.Config, error) {
-	var c pool.Config
-	bs, err := base64.StdEncoding.DecodeString(token)
-	if core.IsErr(err, "cannot decousterde token: %v") {
-		return c, err
-	}
-	err = yaml.Unmarshal(bs, &c)
-	if core.IsErr(err, "cannot unmarshal config from token: %v") {
-		return c, err
+// JoinPool adds a pool by using the provided invite token
+func JoinPool(token string) (pool.Config, error) {
+	i, err := registry.Decode(Self, token)
+	if core.IsErr(err, "invalid token: %v") {
+		return pool.Config{}, err
 	}
 
-	if c.Name == "" || (len(c.Public)+len(c.Private)) == 0 {
-		core.IsErr(pool.ErrInvalidToken, "invalid config '%s': %v", string(bs))
-		return c, pool.ErrInvalidToken
-	} else {
-		core.Info("valid token for pool '%s'", c.Name)
+	if i.Config == nil {
+		return pool.Config{}, core.ErrNotAuthorized
+	}
+	err = i.Join()
+	if core.IsErr(err, "cannot join pool '%s': %v", i.Config.Name) {
+		return *i.Config, err
 	}
 
-	err = pool.Define(c)
-	if core.IsErr(err, "cannot define pool '%s': %v", c.Name) {
-		return c, err
-	}
-	p, err := pool.Open(Self, c.Name)
-	if core.IsErr(err, "cannot open pool '%s': %v", c.Name) {
-		return c, err
-	}
-	p.Close()
+	return *i.Config, nil
+}
 
-	return c, nil
+// ValidateInvite checks the validity of the provided invite token and returns the token object
+func ValidateInvite(token string) (registry.Invite, error) {
+	i, err := registry.Decode(Self, token)
+	if core.IsErr(err, "invalid token: %v") {
+		return registry.Invite{}, err
+	}
+	return i, err
 }
 
 func GetPool(name string) (*pool.Pool, error) {
@@ -172,4 +168,43 @@ func PostMessage(poolName string, contentType string, text string, bytes []byte)
 		return 0, err
 	}
 	return id, nil
+}
+
+type Notification struct {
+	Pool    string `json:"pool"`
+	App     string `json:"app"`
+	Message string `json:"message"`
+	Count   int    `json:"count"`
+}
+
+func GetUpdates(ctime int64) []Notification {
+	var ns []Notification
+
+	for _, name := range pool.List() {
+		p, err := pool.Open(Self, name)
+		if err != nil {
+			continue
+		}
+
+		appsCount := map[string]int{}
+		p.Sync()
+
+		feeds, _ := p.List(ctime)
+		for _, f := range feeds {
+			parts := strings.SplitN(f.Name, "/", 2)
+			if len(parts) == 2 {
+				appsCount[parts[0]] += 1
+			}
+		}
+
+		for app, count := range appsCount {
+			ns = append(ns, Notification{
+				Pool:  p.Name,
+				App:   app,
+				Count: count,
+			})
+		}
+	}
+
+	return ns
 }

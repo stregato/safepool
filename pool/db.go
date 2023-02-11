@@ -8,8 +8,8 @@ import (
 	"github.com/code-to-go/safepool/sql"
 )
 
-func sqlGetFeeds(pool string, offset int) ([]Feed, error) {
-	rows, err := sql.Query("GET_FEEDS", sql.Args{"pool": pool, "offset": offset})
+func sqlGetFeeds(pool string, ctime int64) ([]Feed, error) {
+	rows, err := sql.Query("GET_FEEDS", sql.Args{"pool": pool, "ctime": ctime})
 	if core.IsErr(err, "cannot get pools feeds from db: %v") {
 		return nil, err
 	}
@@ -21,7 +21,7 @@ func sqlGetFeeds(pool string, offset int) ([]Feed, error) {
 		var modTime int64
 		var hash string
 		var meta string
-		err = rows.Scan(&f.Id, &f.Name, &modTime, &f.Size, &f.AuthorId, &hash, &f.Offset, &meta, &f.Slot)
+		err = rows.Scan(&f.Id, &f.Name, &modTime, &f.Size, &f.AuthorId, &hash, &meta, &f.Slot, &f.CTime)
 		if !core.IsErr(err, "cannot read pool feeds from db: %v") {
 			f.Hash = sql.DecodeBase64(hash)
 			f.ModTime = sql.DecodeTime(modTime)
@@ -38,7 +38,7 @@ func sqlGetFeed(pool string, id uint64) (Feed, error) {
 	var hash string
 	var meta string
 	err := sql.QueryRow("GET_FEED", sql.Args{"pool": pool, "id": id},
-		&f.Id, &f.Name, &modTime, &f.Size, &f.AuthorId, &hash, &f.Offset, &meta, &f.Slot)
+		&f.Id, &f.Name, &modTime, &f.Size, &f.AuthorId, &hash, &meta, &f.Slot, &f.CTime)
 	if core.IsErr(err, "cannot get feed with id '%d' in pool '%s': %v", id, pool) {
 		return Feed{}, err
 	}
@@ -65,6 +65,7 @@ func sqlAddFeed(pool string, f Feed) error {
 		"hash":     sql.EncodeBase64(f.Hash[:]),
 		"meta":     sql.EncodeBase64(f.Meta),
 		"slot":     f.Slot,
+		"ctime":    f.CTime,
 	})
 	return err
 }

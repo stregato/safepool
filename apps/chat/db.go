@@ -7,13 +7,13 @@ import (
 	"github.com/code-to-go/safepool/sql"
 )
 
-func sqlSetMessage(pool string, id uint64, author string, m Message, offset int) error {
+func sqlSetMessage(pool string, id uint64, author string, m Message, ctime int64) error {
 	message, err := json.Marshal(m)
 	if core.IsErr(err, "cannot marshal chat message: %v") {
 		return err
 	}
 
-	_, err = sql.Exec("SET_CHAT_MESSAGE", sql.Args{"pool": pool, "id": id, "author": author, "message": message, "offset": offset})
+	_, err = sql.Exec("SET_CHAT_MESSAGE", sql.Args{"pool": pool, "id": id, "author": author, "message": message, "ctime": ctime})
 	core.IsErr(err, "cannot set message %d on db: %v", id)
 	return err
 }
@@ -38,11 +38,11 @@ func sqlGetMessages(pool string, afterId uint64, beforeId uint64, limit int) ([]
 	return messages, err
 }
 
-func sqlGetOffset(pool string) int {
-	var offset int
-	err := sql.QueryRow("GET_CHATS_OFFSET", sql.Args{"pool": pool}, &offset)
+func sqlGetCTime(pool string) int64 {
+	var ctime int64
+	err := sql.QueryRow("GET_CHATS_CTIME", sql.Args{"pool": pool}, &ctime)
 	if err == nil {
-		return offset
+		return ctime
 	} else {
 		return 0
 	}

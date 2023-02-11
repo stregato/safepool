@@ -50,7 +50,6 @@ INSERT INTO configs(pool,k,s,i,b) VALUES(:pool,:key,:s,:i,:b)
 
 -- INIT
 CREATE TABLE IF NOT EXISTS feeds (
-    offset INTEGER PRIMARY KEY AUTOINCREMENT,
     pool VARCHAR(128) NOT NULL, 
     id INTEGER NOT NULL,
     name VARCHAR(8192) NOT NULL, 
@@ -59,7 +58,9 @@ CREATE TABLE IF NOT EXISTS feeds (
     authorId VARCHAR(80) NOT NULL,
     hash VARCHAR(128) NOT NULL, 
     meta VARCHAR(4096) NOT NULL,
-    slot VARCHAR(16) NOT NULL
+    slot VARCHAR(16) NOT NULL,
+    ctime INTEGER NOT NULL,
+    PRIMARY KEY(id)
 )
 
 -- INIT
@@ -72,13 +73,13 @@ CREATE INDEX IF NOT EXISTS idx_feeds_pool ON feeds(pool);
 CREATE INDEX IF NOT EXISTS idx_feeds_name ON feeds(name);
 
 -- GET_FEEDS
-SELECT id, name, modTime, size, authorId, hash, offset, meta, slot FROM feeds WHERE pool=:pool AND offset > :offset ORDER BY offset
+SELECT id, name, modTime, size, authorId, hash, meta, slot, ctime FROM feeds WHERE pool=:pool AND ctime > :ctime ORDER BY ctime
 
 -- GET_FEED
-SELECT id, name, modTime, size, authorId, hash, offset, meta, slot FROM feeds WHERE pool=:pool AND id=:id
+SELECT id, name, modTime, size, authorId, hash, meta, slot, ctime FROM feeds WHERE pool=:pool AND id=:id
 
 -- SET_FEED
-INSERT INTO feeds(pool,id,name,modTime,size,authorId,hash,meta,slot) VALUES(:pool,:id,:name,:modTime,:size,:authorId,:hash,:meta,:slot)
+INSERT INTO feeds(pool,id,name,modTime,size,authorId,hash,meta,slot,ctime) VALUES(:pool,:id,:name,:modTime,:size,:authorId,:hash,:meta,:slot,:ctime)
 
 -- DEL_FEED_BEFORE
 DELETE FROM feeds WHERE pool=:pool AND id <:beforeId
@@ -169,20 +170,83 @@ CREATE TABLE IF NOT EXISTS chats (
     id INTEGER,
     author VARCHAR(128),
     message BLOB,
-    offset INTEGER,
+    ctime INTEGER,
     CONSTRAINT pk_pool_id_author PRIMARY KEY(pool,id,author)
 );
 
+func sqlGetLocal(pool, base, name string) (Local, bool, error) {
+	//SELECT name,path,id,authorId,modTime,size,hash,hashChain FROM library_locals WHERE pool=:pool AND base=:base AND name=:name
+
+	var l Local
+	var hash string
+	var modTime int64
+	var hashChain []byte
+	err := sql.QueryRow("GET_LIBRARY_LOCAL", sql.Args{"pool": pool, "base": base, "name": name},
+		&l.Name, &l.Path, &l.Id, &l.AuthorId, &modTime, &l.Size, &hash, &hashChain)
+	if err == sql.ErrNoRows {
+		return l, false, nil
+	}
+	if core.IsErr(err, "cannot get local for name %s on db: %v", l.Name) {
+		return l, false, err
+	}
+	l.ModTime = sql.DecodeTime(modTime)
+	l.Hash = sql.DecodeBase64(hash)
+	json.Unmarshal(hashChain, &l.HashChain)
+
+	return l, true, nil
+}
+
+func sqlGetLocalsInFolder(pool string, base string, folder string) ([]Local, error) {
+	//SELECT name,path,id,authorId,modTime,size,hash,hashChain FROM library_locals WHERE pool=:pool AND base=:base AND folder=:folder
+	rows, err := sql.Query("GET_LIBRARY_LOCALS_IN_FOLDER", sql.Args{"pool": pool, "base": base, "folder": folder})
+	if core.IsErr(err, "cannot query documents from db: %v") {
+		return nil, err
+	}
+	var locals []Local
+	for rows.Next() {
+		var l Local
+		var hash string
+		var hashChain []byte
+		var modTime int64
+
+		err = rows.Scan(&l.Name, &l.Path, &l.Id, &l.AuthorId, &modTime, &l.Size, &hash, &hashChain)
+		if !core.IsErr(err, "cannot scan row in Locals: %v", err) {
+			l.ModTime = sql.DecodeTime(modTime)
+			l.Hash = sql.DecodeBase64(hash)
+			json.Unmarshal(hashChain, &l.HashChain)
+			locals = append(locals, l)
+		}
+	}
+	return locals, nil
+}
+
+func sqlGetFilesHashes(pool string, base string, name string, limit int) ([][]byte, error) {
+	rows, err := sql.Query("GET_LIBRARY_FILES_HASHES", sql.Args{"pool": pool, "base": base, "name": name, "limit": limit})
+	if core.IsErr(err, "cannot get file hashes from db: %v") {
+		return nil, err
+	}
+	var hashes [][]byte
+	for rows.Next() {
+		var hash string
+		err = rows.Scan(&hash)
+		if !core.IsErr(err, "cannot scan row in file hashes: %v", err) {
+			hashes = append(hashes, sql.DecodeBase64(hash))
+		}
+	}
+	return hashes, nil
+}
+
+
 -- SET_CHAT_MESSAGE
-INSERT INTO chats(pool,id,author,message,offset) VALUES(:pool,:id,:author,:message, :offset)
+INSERT INTO chats(pool,id,author,message,ctime) VALUES(:pool,:id,:author,:message, :ctime)
     ON CONFLICT(pool,id,author) DO UPDATE SET message=:message
 	    WHERE pool=:pool AND id=:id AND author=:author
 
 -- GET_CHAT_MESSAGES
 SELECT message FROM chats WHERE pool=:pool AND id > :afterId AND id < :beforeId ORDER BY id DESC LIMIT :limit
 
--- GET_CHATS_OFFSET
-SELECT max(offset) FROM chats WHERE pool=:pool
+-- GET_CHATS_CTIME
+SELECT max(ctime) FROM chats WHERE pool=:pool
 
 -- INIT
 CREATE TABLE IF NOT EXISTS library_files (
@@ -196,29 +260,29 @@ CREATE TABLE IF NOT EXISTS library_files (
     contentType VARCHAR(128) NOT NULL,
     hash VARCHAR(128) NOT NULL,
     hashChain BLOB,
-    offset INTEGER NOT NULL,
+    ctime INTEGER NOT NULL,
     folder VARCHAR(4096) NOT NULL,
     level INTEGER NOT NULL,
     CONSTRAINT pk_pool_base_id PRIMARY KEY(pool,base,name,authorId)
 );
 
 -- SET_LIBRARY_FILE
-INSERT INTO library_files(pool,base,id,name,authorId,modTime,size,contentType,hash,hashChain,offset,folder,level) 
-    VALUES(:pool,:base,:id,:name,:authorId,:modTime,:size,:contentType,:hash,:hashChain,:offset,:folder,:level)
+INSERT INTO library_files(pool,base,id,name,authorId,modTime,size,contentType,hash,hashChain,ctime,folder,level) 
+    VALUES(:pool,:base,:id,:name,:authorId,:modTime,:size,:contentType,:hash,:hashChain,:ctime,:folder,:level)
     ON CONFLICT(pool,base,name,authorId) DO UPDATE SET id=:id,modTime=:modTime,size=:size,
-    contentType=:contentType,hash=:hash, hashChain=:hashChain,offset=:offset
+    contentType=:contentType,hash=:hash, hashChain=:hashChain,ctime=:ctime
 	    WHERE pool=:pool AND base=:base AND name=:name AND authorId=:authorId
 
 -- GET_LIBRARY_FILES_IN_FOLDER
-SELECT name,authorId,modTime,id,size,contentType,hash,hashChain,offset FROM library_files 
+SELECT name,authorId,modTime,id,size,contentType,hash,hashChain,ctime FROM library_files 
     WHERE pool=:pool AND base=:base AND folder=:folder ORDER BY name
 
 -- GET_LIBRARY_FILE_BY_ID
-SELECT name,authorId,modTime,id,size,contentType,hash,hashChain,offset FROM library_files 
+SELECT name,authorId,modTime,id,size,contentType,hash,hashChain,ctime FROM library_files 
     WHERE pool=:pool AND base=:base AND id=:id
 
 -- GET_LIBRARY_FILE_BY_NAME
-SELECT name,authorId,modTime,id,size,contentType,hash,hashChain,offset FROM library_files 
+SELECT name,authorId,modTime,id,size,contentType,hash,hashChain,ctime FROM library_files 
     WHERE pool=:pool AND base=:base AND name=:name AND authorId=:authorId
 
 -- GET_LIBRARY_FILES_SUBFOLDERS
@@ -227,8 +291,8 @@ SELECT folder FROM library_files WHERE pool=:pool AND base=:base AND folder LIKE
 -- GET_LIBRARY_FILES_HASHES
 SELECT hash FROM library_files WHERE pool=:pool AND base=:base AND name=:name ORDER BY modTime DESC LIMIT :limit
 
--- GET_LIBRARY_FILES_OFFSET
-SELECT max(offset) FROM library_files WHERE pool=:pool AND base=:base 
+-- GET_LIBRARY_FILES_CTIME
+SELECT max(ctime) FROM library_files WHERE pool=:pool AND base=:base 
 
 -- INIT
 CREATE TABLE IF NOT EXISTS library_locals (
@@ -258,3 +322,23 @@ SELECT name,path,id,authorId,modTime,size,hash,hashChain FROM library_locals WHE
 
 -- GET_LIBRARY_LOCAL
 SELECT name,path,id,authorId,modTime,size,hash,hashChain FROM library_locals WHERE pool=:pool AND base=:base AND name=:name
+
+-- INIT
+CREATE TABLE IF NOT EXISTS invites (
+    pool VARCHAR(128) NOT NULL,
+    ctime INTEGER NOT NULL,
+    valid INTEGER NOT NULL,
+    content BLOB NOT NULL,
+);
+
+-- INIT
+CREATE INDEX IF NOT EXISTS idx_invites ON invites(ctime);
+
+-- GET_INVITES
+SELECT content FROM invites WHERE pool=:pool AND ctime>:ctime
+
+-- GET_INVITES_VALID
+SELECT content FROM invites WHERE pool=:pool AND ctime>:ctime AND valid 
+
+-- GET_INVITES_CTIME
+SELECT max(ctime) FROM invites WHERE pool=:pool

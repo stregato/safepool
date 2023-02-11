@@ -18,13 +18,13 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type SFTPConfig struct {
-	Addr     string `json:"addr" yaml:"addr"`
-	Username string `json:"username" yaml:"username"`
-	Password string `json:"password" yaml:"password"`
-	KeyPath  string `json:"keyPath" yaml:"keyPath"`
-	Base     string `json:"base" yaml:"base"`
-}
+// type SFTPConfig struct {
+// 	Addr     string `json:"addr" yaml:"addr"`
+// 	Username string `json:"username" yaml:"username"`
+// 	Password string `json:"password" yaml:"password"`
+// 	KeyPath  string `json:"keyPath" yaml:"keyPath"`
+// 	Base     string `json:"base" yaml:"base"`
+// }
 
 type SFTP struct {
 	c     *sftp.Client
@@ -33,24 +33,24 @@ type SFTP struct {
 	touch map[string]time.Time
 }
 
-func ParseSFTPUrl(s string) (SFTPConfig, error) {
-	u, err := url.Parse(s)
-	if err != nil {
-		return SFTPConfig{}, err
-	}
+// func ParseSFTPUrl(s string) (SFTPConfig, error) {
+// 	u, err := url.Parse(s)
+// 	if err != nil {
+// 		return SFTPConfig{}, err
+// 	}
 
-	password, _ := u.User.Password()
-	return SFTPConfig{
-		Addr:     u.Host,
-		Username: u.User.Username(),
-		Password: password,
-		Base:     u.Path,
-	}, nil
-}
+// 	password, _ := u.User.Password()
+// 	return SFTPConfig{
+// 		Addr:     u.Host,
+// 		Username: u.User.Username(),
+// 		Password: password,
+// 		Base:     u.Path,
+// 	}, nil
+// }
 
-func ToUrl(config SFTPConfig) string {
-	return fmt.Sprintf("sftp://%s@%s/%s", config.Username, config.Addr, config.Base)
-}
+// func ToUrl(config SFTPConfig) string {
+// 	return fmt.Sprintf("sftp://%s@%s/%s", config.Username, config.Addr, config.Base)
+// }
 
 // NewSFTP create a new Exchanger. The url is in the format sftp://
 func NewSFTP(connectionUrl string) (Exchanger, error) {

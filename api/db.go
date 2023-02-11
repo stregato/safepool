@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"github.com/code-to-go/safepool/sql"
