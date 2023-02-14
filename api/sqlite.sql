@@ -122,20 +122,21 @@ INSERT INTO pools(name,configs) VALUES(:name,:configs)
 	    WHERE name=:name
 
 -- INIT
-CREATE TABLE IF NOT EXISTS slots (
+CREATE TABLE IF NOT EXISTS checkpoints (
     pool VARCHAR(512),
-    exchange VARCHAR(4096),
+    tag VARCHAR(4096),
     slot VARCHAR(16),
-    CONSTRAINT pk_pool_exchange PRIMARY KEY(pool,exchange)
+    modTime INTEGER,
+    CONSTRAINT pk_checkpoints PRIMARY KEY(pool,tag)
 );
 
--- SET_SLOT
-INSERT INTO slots(pool,exchange,slot) VALUES(:pool,:exchange,:slot)
-    ON CONFLICT(pool,exchange) DO UPDATE SET slot=:slot
-	    WHERE pool=:pool AND exchange=:exchange
+-- SET_CHECKPOINT
+INSERT INTO checkpoints(pool,tag,slot,modTime) VALUES(:pool,:tag,:slot,:modTime)
+    ON CONFLICT(pool,tag) DO UPDATE SET slot=:slot,modTime=:modTime
+	    WHERE pool=:pool AND tag=:tag
 
--- GET_SLOT
-SELECT slot FROM slots WHERE pool=:pool AND exchange=:exchange
+-- GET_CHECKPOINT
+SELECT slot,modTime FROM checkpoints WHERE pool=:pool AND tag=:tag
 
 -- INIT
 CREATE TABLE IF NOT EXISTS accesses (
@@ -169,84 +170,18 @@ CREATE TABLE IF NOT EXISTS chats (
     pool VARCHAR(128),
     id INTEGER,
     author VARCHAR(128),
+    time INTEGER,
     message BLOB,
-    ctime INTEGER,
     CONSTRAINT pk_pool_id_author PRIMARY KEY(pool,id,author)
 );
 
-func sqlGetLocal(pool, base, name string) (Local, bool, error) {
-	//SELECT name,path,id,authorId,modTime,size,hash,hashChain FROM library_locals WHERE pool=:pool AND base=:base AND name=:name
-
-	var l Local
-	var hash string
-	var modTime int64
-	var hashChain []byte
-	err := sql.QueryRow("GET_LIBRARY_LOCAL", sql.Args{"pool": pool, "base": base, "name": name},
-		&l.Name, &l.Path, &l.Id, &l.AuthorId, &modTime, &l.Size, &hash, &hashChain)
-	if err == sql.ErrNoRows {
-		return l, false, nil
-	}
-	if core.IsErr(err, "cannot get local for name %s on db: %v", l.Name) {
-		return l, false, err
-	}
-	l.ModTime = sql.DecodeTime(modTime)
-	l.Hash = sql.DecodeBase64(hash)
-	json.Unmarshal(hashChain, &l.HashChain)
-
-	return l, true, nil
-}
-
-func sqlGetLocalsInFolder(pool string, base string, folder string) ([]Local, error) {
-	//SELECT name,path,id,authorId,modTime,size,hash,hashChain FROM library_locals WHERE pool=:pool AND base=:base AND folder=:folder
-	rows, err := sql.Query("GET_LIBRARY_LOCALS_IN_FOLDER", sql.Args{"pool": pool, "base": base, "folder": folder})
-	if core.IsErr(err, "cannot query documents from db: %v") {
-		return nil, err
-	}
-	var locals []Local
-	for rows.Next() {
-		var l Local
-		var hash string
-		var hashChain []byte
-		var modTime int64
-
-		err = rows.Scan(&l.Name, &l.Path, &l.Id, &l.AuthorId, &modTime, &l.Size, &hash, &hashChain)
-		if !core.IsErr(err, "cannot scan row in Locals: %v", err) {
-			l.ModTime = sql.DecodeTime(modTime)
-			l.Hash = sql.DecodeBase64(hash)
-			json.Unmarshal(hashChain, &l.HashChain)
-			locals = append(locals, l)
-		}
-	}
-	return locals, nil
-}
-
-func sqlGetFilesHashes(pool string, base string, name string, limit int) ([][]byte, error) {
-	rows, err := sql.Query("GET_LIBRARY_FILES_HASHES", sql.Args{"pool": pool, "base": base, "name": name, "limit": limit})
-	if core.IsErr(err, "cannot get file hashes from db: %v") {
-		return nil, err
-	}
-	var hashes [][]byte
-	for rows.Next() {
-		var hash string
-		err = rows.Scan(&hash)
-		if !core.IsErr(err, "cannot scan row in file hashes: %v", err) {
-			hashes = append(hashes, sql.DecodeBase64(hash))
-		}
-	}
-	return hashes, nil
-}
-
-
 -- SET_CHAT_MESSAGE
-INSERT INTO chats(pool,id,author,message,ctime) VALUES(:pool,:id,:author,:message, :ctime)
-    ON CONFLICT(pool,id,author) DO UPDATE SET message=:message
+INSERT INTO chats(pool,id,author,time,message) VALUES(:pool,:id,:author,:time,:message)
+    ON CONFLICT(pool,id,author) DO UPDATE SET message=:message,time=:time
 	    WHERE pool=:pool AND id=:id AND author=:author
 
 -- GET_CHAT_MESSAGES
-SELECT message FROM chats WHERE pool=:pool AND id > :afterId AND id < :beforeId ORDER BY id DESC LIMIT :limit
-
--- GET_CHATS_CTIME
-SELECT max(ctime) FROM chats WHERE pool=:pool
+SELECT message FROM chats WHERE pool=:pool AND time > :after AND time < :before ORDER BY time DESC LIMIT :limit
 
 -- INIT
 CREATE TABLE IF NOT EXISTS library_files (
@@ -291,9 +226,6 @@ SELECT folder FROM library_files WHERE pool=:pool AND base=:base AND folder LIKE
 -- GET_LIBRARY_FILES_HASHES
 SELECT hash FROM library_files WHERE pool=:pool AND base=:base AND name=:name ORDER BY modTime DESC LIMIT :limit
 
--- GET_LIBRARY_FILES_CTIME
-SELECT max(ctime) FROM library_files WHERE pool=:pool AND base=:base 
-
 -- INIT
 CREATE TABLE IF NOT EXISTS library_locals (
     pool VARCHAR(128) NOT NULL,
@@ -328,11 +260,15 @@ CREATE TABLE IF NOT EXISTS invites (
     pool VARCHAR(128) NOT NULL,
     ctime INTEGER NOT NULL,
     valid INTEGER NOT NULL,
-    content BLOB NOT NULL,
+    content BLOB NOT NULL
 );
 
 -- INIT
 CREATE INDEX IF NOT EXISTS idx_invites ON invites(ctime);
+
+-- SET_INVITE
+INSERT INTO invites(pool,ctime,valid,content)
+    VALUES(:pool,:ctime,:valid,:content)
 
 -- GET_INVITES
 SELECT content FROM invites WHERE pool=:pool AND ctime>:ctime
@@ -340,5 +276,19 @@ SELECT content FROM invites WHERE pool=:pool AND ctime>:ctime
 -- GET_INVITES_VALID
 SELECT content FROM invites WHERE pool=:pool AND ctime>:ctime AND valid 
 
--- GET_INVITES_CTIME
-SELECT max(ctime) FROM invites WHERE pool=:pool
+-- INIT
+CREATE TABLE IF NOT EXISTS breakpoints (
+    pool VARCHAR(128) NOT NULL,
+    app VARCHAR(128) NOT NULL,
+    ctime INTEGER NOT NULL,
+    CONSTRAINT pk_breakpoints PRIMARY KEY(pool,app)
+);
+
+-- SET_BREAKPOINT
+INSERT INTO breakpoints(pool,app,ctime) VALUES(:pool,:app,:ctime)
+    ON CONFLICT(pool,app) DO UPDATE SET ctime=:ctime
+	    WHERE pool=:pool AND app=:app
+
+-- GET_BREAKPOINT
+SELECT ctime FROM breakpoints WHERE pool=:pool AND app=:app
+

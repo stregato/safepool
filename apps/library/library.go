@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/code-to-go/safepool/apps/common"
 	"github.com/code-to-go/safepool/core"
 	pool "github.com/code-to-go/safepool/pool"
 	"github.com/code-to-go/safepool/security"
@@ -86,8 +87,8 @@ type List struct {
 }
 
 type Library struct {
-	Pool    *pool.Pool
-	Channel string
+	Pool *pool.Pool
+	Name string
 }
 
 type meta struct {
@@ -97,10 +98,10 @@ type meta struct {
 }
 
 // Get returns a library app mounted on the provided path in the pool
-func Get(p *pool.Pool, channel string) Library {
+func Get(p *pool.Pool, name string) Library {
 	return Library{
-		Pool:    p,
-		Channel: channel,
+		Pool: p,
+		Name: name,
 	}
 }
 
@@ -130,7 +131,7 @@ func (l *Library) getStateForLocal(lo Local) State {
 	}
 
 	lo.ModTime = stat.ModTime()
-	sqlSetLocal(l.Pool.Name, l.Channel, lo)
+	sqlSetLocal(l.Pool.Name, l.Name, lo)
 
 	return Sync
 }
@@ -207,25 +208,28 @@ func (l *Library) getDocuments(files []File, locals []Local) ([]Document, error)
 
 // List returns the documents in provided folder
 func (l *Library) List(folder string) (List, error) {
-	hs, _ := l.Pool.List(sqlGetCTime(l.Pool.Name, l.Channel))
-	for _, h := range hs {
-		l.accept(h)
+	ctime := common.GetBreakpoint(l.Pool.Name, l.Name)
+	fs, _ := l.Pool.List(ctime)
+	for _, f := range fs {
+		l.accept(f)
+		ctime = f.CTime
 	}
+	common.SetBreakpoint(l.Pool.Name, l.Name, ctime)
 
-	subfolders, err := sqlGetSubfolders(l.Pool.Name, l.Channel, folder)
-	if core.IsErr(err, "cannot list subfolders in %s/%s/%s: %v", l.Pool.Name, l.Channel, folder) {
+	subfolders, err := sqlGetSubfolders(l.Pool.Name, l.Name, folder)
+	if core.IsErr(err, "cannot list subfolders in %s/%s/%s: %v", l.Pool.Name, l.Name, folder) {
 		return List{}, err
 	}
-	files, err := sqlFilesInFolder(l.Pool.Name, l.Channel, folder)
-	if core.IsErr(err, "cannot list documents in %s/%s/%s: %v", l.Pool.Name, l.Channel, folder) {
+	files, err := sqlFilesInFolder(l.Pool.Name, l.Name, folder)
+	if core.IsErr(err, "cannot list documents in %s/%s/%s: %v", l.Pool.Name, l.Name, folder) {
 		return List{}, err
 	}
-	locals, err := sqlGetLocalsInFolder(l.Pool.Name, l.Channel, folder)
-	if core.IsErr(err, "cannot list locals in %s/%s/%s: %v", l.Pool.Name, l.Channel, folder) {
+	locals, err := sqlGetLocalsInFolder(l.Pool.Name, l.Name, folder)
+	if core.IsErr(err, "cannot list locals in %s/%s/%s: %v", l.Pool.Name, l.Name, folder) {
 		return List{}, err
 	}
 	documents, err := l.getDocuments(files, locals)
-	if core.IsErr(err, "cannot join locals and files in %s/%s/%s: %v", l.Pool.Name, l.Channel, folder) {
+	if core.IsErr(err, "cannot join locals and files in %s/%s/%s: %v", l.Pool.Name, l.Name, folder) {
 		return List{}, err
 	}
 
@@ -258,7 +262,7 @@ func (l *Library) Receive(id uint64, localPath string) (pool.Feed, error) {
 		return pool.Feed{}, err
 	}
 
-	d, ok, err := sqlGetDocumentById(l.Pool.Name, l.Channel, id)
+	d, ok, err := sqlGetDocumentById(l.Pool.Name, l.Name, id)
 	if core.IsErr(err, "cannot get document with id '%d': %v", id) {
 		return pool.Feed{}, err
 	}
@@ -289,7 +293,7 @@ func (l *Library) Receive(id uint64, localPath string) (pool.Feed, error) {
 		HashChain: d.HashChain,
 	}
 
-	err = sqlSetLocal(l.Pool.Name, l.Channel, lo)
+	err = sqlSetLocal(l.Pool.Name, l.Name, lo)
 	if core.IsErr(err, "cannot update document for id %d: %v", id) {
 		return pool.Feed{}, err
 	}
@@ -301,18 +305,13 @@ func (l *Library) Delete(id uint64) error {
 }
 
 func (l *Library) GetLocalPath(name string) (string, bool) {
-	lo, ok, _ := sqlGetLocal(l.Pool.Name, l.Channel, name)
+	lo, ok, _ := sqlGetLocal(l.Pool.Name, l.Name, name)
 	if ok {
 		return lo.Path, true
 	} else {
 		return "", false
 	}
 }
-
-// func (l *Library) GetLocalDocument(name string) (File, bool) {
-// 	d, ok, _ := sqlGetLocal(l.Pool.Name, l.Channel, name)
-// 	return d, ok
-// }
 
 // Send uploads the specified file localPath to the pool with the provided name. When solveConflicts is true
 // the
@@ -325,12 +324,12 @@ func (l *Library) Send(localPath string, name string, solveConflicts bool, tags 
 	stat, _ := os.Stat(localPath)
 
 	var hashChain [][]byte
-	lo, ok, err := sqlGetLocal(l.Pool.Name, l.Channel, name)
+	lo, ok, err := sqlGetLocal(l.Pool.Name, l.Name, name)
 	if core.IsErr(err, "db error in reading document %s: %v", name) {
 		return pool.Feed{}, err
 	}
 	if solveConflicts {
-		hashChain, err = sqlGetFilesHashes(l.Pool.Name, l.Channel, name, HashChainMaxLength)
+		hashChain, err = sqlGetFilesHashes(l.Pool.Name, l.Name, name, HashChainMaxLength)
 		if core.IsErr(err, "cannot get hashes for file %s: %v", name) {
 			return pool.Feed{}, err
 		}
@@ -356,7 +355,7 @@ func (l *Library) Send(localPath string, name string, solveConflicts bool, tags 
 	}
 	defer f.Close()
 
-	h, err := l.Pool.Send(path.Join(l.Channel, name), f, m)
+	h, err := l.Pool.Send(path.Join(l.Name, name), f, m)
 	if core.IsErr(err, "cannot post content to pool '%s': %v", l.Pool.Name) {
 		return pool.Feed{}, err
 	}
@@ -372,12 +371,12 @@ func (l *Library) Send(localPath string, name string, solveConflicts bool, tags 
 		Hash:      h.Hash,
 		HashChain: hashChain,
 	}
-	err = sqlSetLocal(l.Pool.Name, l.Channel, lo)
+	err = sqlSetLocal(l.Pool.Name, l.Name, lo)
 	return h, err
 }
 
 func (l *Library) accept(feed pool.Feed) {
-	if !strings.HasPrefix(feed.Name, l.Channel+"/") {
+	if !strings.HasPrefix(feed.Name, l.Name+"/") {
 		return
 	}
 
@@ -386,7 +385,7 @@ func (l *Library) accept(feed pool.Feed) {
 	if core.IsErr(err, "invalid meta in feed: %v") {
 		return
 	}
-	name := feed.Name[len(l.Channel)+1:]
+	name := feed.Name[len(l.Name)+1:]
 
 	f := File{
 		Id:          feed.Id,
@@ -400,6 +399,6 @@ func (l *Library) accept(feed pool.Feed) {
 		HashChain:   m.HashChain,
 	}
 
-	err = sqlSetDocument(l.Pool.Name, l.Channel, f)
+	err = sqlSetDocument(l.Pool.Name, l.Name, f)
 	core.IsErr(err, "cannot save document to db: %v")
 }

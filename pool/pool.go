@@ -51,13 +51,13 @@ type Pool struct {
 	houseKeepingLock sync.Mutex
 }
 
-type Identity struct {
-	security.Identity
-	//Since is the keyId used when the identity was added to the Pool access
-	Since uint64
-	//AddedOn is the timestamp when the identity is stored on the local DB
-	AddedOn time.Time
-}
+// type User2 struct {
+// 	security.Identity
+// 	//Since is the keyId used when the identity was added to the Pool access
+// 	Since uint64
+// 	//AddedOn is the timestamp when the identity is stored on the local DB
+// 	AddedOn time.Time
+// }
 
 type Feed struct {
 	Id        uint64
@@ -309,7 +309,7 @@ func (p *Pool) Delete() error {
 	return nil
 }
 
-func (p *Pool) Identities() ([]security.Identity, error) {
+func (p *Pool) Users() ([]security.Identity, error) {
 	identities, _, err := p.sqlGetAccesses(false)
 	return identities, err
 }

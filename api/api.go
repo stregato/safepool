@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/code-to-go/safepool/apps/chat"
-	"github.com/code-to-go/safepool/apps/registry"
+	"github.com/code-to-go/safepool/apps/invite"
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/pool"
 	"github.com/code-to-go/safepool/security"
@@ -106,7 +106,7 @@ func CreatePool(c pool.Config, apps []string) error {
 
 // JoinPool adds a pool by using the provided invite token
 func JoinPool(token string) (pool.Config, error) {
-	i, err := registry.Decode(Self, token)
+	i, err := invite.Decode(Self, token)
 	if core.IsErr(err, "invalid token: %v") {
 		return pool.Config{}, err
 	}
@@ -123,10 +123,10 @@ func JoinPool(token string) (pool.Config, error) {
 }
 
 // ValidateInvite checks the validity of the provided invite token and returns the token object
-func ValidateInvite(token string) (registry.Invite, error) {
-	i, err := registry.Decode(Self, token)
+func ValidateInvite(token string) (invite.Invite, error) {
+	i, err := invite.Decode(Self, token)
 	if core.IsErr(err, "invalid token: %v") {
-		return registry.Invite{}, err
+		return invite.Invite{}, err
 	}
 	return i, err
 }
@@ -146,14 +146,23 @@ func GetPool(name string) (*pool.Pool, error) {
 	return p, nil
 }
 
-func GetMessages(poolName string, afterIdS, beforeIdS uint64, limit int) ([]chat.Message, error) {
+func GetUsers(poolName string) ([]security.Identity, error) {
+	p, err := GetPool(poolName)
+	if core.IsErr(err, "cannot get pool '%s' for chat app", poolName) {
+		return nil, err
+	}
+
+	return p.Users()
+}
+
+func GetMessages(poolName string, after, before time.Time, limit int) ([]chat.Message, error) {
 	p, err := GetPool(poolName)
 	if core.IsErr(err, "cannot get pool '%s' for chat app", poolName) {
 		return nil, err
 	}
 
 	ch := chat.Get(p, "chat")
-	return ch.GetMessages(afterIdS, beforeIdS, limit)
+	return ch.GetMessages(after, before, limit)
 }
 
 func PostMessage(poolName string, contentType string, text string, bytes []byte) (uint64, error) {

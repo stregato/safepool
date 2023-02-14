@@ -16,6 +16,7 @@ import "C"
 import (
 	"encoding/base64"
 	"encoding/json"
+	"time"
 
 	"github.com/code-to-go/safepool/api"
 	"github.com/code-to-go/safepool/core"
@@ -100,6 +101,12 @@ func getPool(name *C.char) C.Result {
 	return cResult(p, err)
 }
 
+//export getUsers
+func getUsers(poolName *C.char) C.Result {
+	identities, err := api.GetUsers(C.GoString(poolName))
+	return cResult(identities, err)
+}
+
 //export validateInvite
 func validateInvite(token *C.char) C.Result {
 	i, err := api.ValidateInvite(C.GoString(token))
@@ -107,9 +114,9 @@ func validateInvite(token *C.char) C.Result {
 }
 
 //export getMessages
-func getMessages(poolName *C.char, afterIdS, beforeIdS C.long, limit C.int) C.Result {
-	messages, err := api.GetMessages(C.GoString(poolName), uint64(afterIdS),
-		uint64(int64(beforeIdS)), int(limit))
+func getMessages(poolName *C.char, after, before C.long, limit C.int) C.Result {
+	messages, err := api.GetMessages(C.GoString(poolName), time.UnixMicro(int64(after)),
+		time.UnixMicro(int64(before)), int(limit))
 	return cResult(messages, err)
 }
 

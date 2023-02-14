@@ -2,7 +2,6 @@ package transport
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"io/fs"
 	"net/url"
@@ -37,19 +36,20 @@ func NewLocal(connectionUrl string) (Exchanger, error) {
 	return &Local{base, connectionUrl, map[string]time.Time{}}, nil
 }
 
-func (l *Local) Touched(name string) bool {
-	touchFile := path.Join(l.base, fmt.Sprintf("%s.touch", name))
-	stat, err := l.Stat(touchFile)
+func (l *Local) GetCheckpoint(name string) int64 {
+	stat, err := l.Stat(name)
 	if err != nil {
-		return true
+		return -1
 	}
-	if stat.ModTime().After(l.touch[name]) {
-		if !core.IsErr(l.Write(touchFile, &bytes.Buffer{}), "cannot write touch file: %v") {
-			l.touch[name] = core.Now()
-		}
-		return true
+	return stat.ModTime().UnixMicro()
+}
+
+func (l *Local) SetCheckpoint(name string) (int64, error) {
+	err := l.Write(name, &bytes.Buffer{})
+	if core.IsErr(err, "cannot write checkpoint '%s': %v", name) {
+		return 0, err
 	}
-	return false
+	return l.GetCheckpoint(name), nil
 }
 
 func (l *Local) Read(name string, rang *Range, dest io.Writer) error {

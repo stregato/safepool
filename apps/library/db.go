@@ -103,16 +103,6 @@ func sqlFilesInFolder(pool string, base string, folder string) ([]File, error) {
 	return documents, nil
 }
 
-func sqlGetCTime(pool string, base string) int64 {
-	var ctime int64
-	err := sql.QueryRow("GET_LIBRARY_FILES_CTIME", sql.Args{"pool": pool, "base": base}, &ctime)
-	if err == nil {
-		return ctime
-	} else {
-		return -1
-	}
-}
-
 func sqlSetLocal(pool string, base string, l Local) error {
 	folder, _ := getFolderAndLevel(path.Dir(l.Name))
 	hashChain, err := json.Marshal(l.HashChain)

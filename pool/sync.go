@@ -1,6 +1,7 @@
 package pool
 
 import (
+	"fmt"
 	"path"
 	"sort"
 	"strconv"
@@ -12,9 +13,7 @@ import (
 
 const FeedsFolder = "feeds"
 
-func (p *Pool) getSlots() ([]string, error) {
-	last, _ := sqlGetSlot(p.Name, p.e.String())
-
+func (p *Pool) getSlots(last string) ([]string, error) {
 	fs, err := p.e.ReadDir(path.Join(p.Name, FeedsFolder), 0)
 	if core.IsErr(err, "cannot list slots in '%v': %v", p) {
 		return nil, err
@@ -32,7 +31,14 @@ func (p *Pool) getSlots() ([]string, error) {
 }
 
 func (p *Pool) Sync() ([]Feed, error) {
-	if !p.e.Touched(p.Name + "/") {
+	tag := fmt.Sprintf("feeds@%s", p.e.String())
+	checkpoint := path.Join(p.Name, ".feed.touch")
+	lastSlot, modTime, err := sqlGetCheckpoint(p.Name, tag)
+	if core.IsErr(err, "cannot read checkpoint for pool '%s': %v", p.Name) {
+		return nil, err
+	}
+
+	if modTime > 0 && p.e.GetCheckpoint(checkpoint) <= modTime {
 		return nil, nil
 	}
 	hs, _ := p.List(0)
@@ -42,7 +48,7 @@ func (p *Pool) Sync() ([]Feed, error) {
 		feeds[h.Id] = h
 	}
 
-	slots, err := p.getSlots()
+	slots, err := p.getSlots(lastSlot)
 	if err != nil {
 		return nil, err
 	}
@@ -81,8 +87,10 @@ func (p *Pool) Sync() ([]Feed, error) {
 			_ = sqlAddFeed(p.Name, f)
 			hs = append(hs, f)
 		}
-		sqlSetSlot(p.Name, p.e.String(), slot)
+		lastSlot = slot
 	}
+	modTime, _ = p.e.SetCheckpoint(checkpoint)
+	sqlSetCheckpoint(p.Name, tag, lastSlot, modTime)
 
 	if time.Until(p.lastHouseKeeping) > ReplicaPeriod {
 		p.HouseKeeping()

@@ -187,19 +187,18 @@ func sqlGetPool(name string) (Config, error) {
 	return c, err
 }
 
-func sqlSetSlot(pool, exchange, slot string) error {
-	_, err := sql.Exec("SET_SLOT", sql.Args{"pool": pool, "exchange": exchange, "slot": slot})
+func sqlSetCheckpoint(pool, tag, slot string, modTime int64) error {
+	_, err := sql.Exec("SET_CHECKPOINT", sql.Args{"pool": pool, "tag": tag, "slot": slot, "modTime": modTime})
 	core.IsErr(err, "cannot save slot %s: %v", slot)
 	return err
 }
 
-func sqlGetSlot(pool, exchange string) (string, error) {
-	var slot string
-	err := sql.QueryRow("GET_SLOT", sql.Args{"pool": pool, "exchange": exchange}, &slot)
-	if core.IsErr(err, "cannot get slot: %v") {
-		return "", err
+func sqlGetCheckpoint(pool, tag string) (slot string, modTime int64, err error) {
+	err = sql.QueryRow("GET_CHECKPOINT", sql.Args{"pool": pool, "tag": tag}, &slot, &modTime)
+	if err != sql.ErrNoRows && core.IsErr(err, "cannot get slot: %v") {
+		return "", 0, err
 	}
-	return slot, nil
+	return slot, modTime, nil
 }
 
 func sqlListPool() ([]string, error) {

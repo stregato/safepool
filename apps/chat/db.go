@@ -2,25 +2,26 @@ package chat
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/sql"
 )
 
-func sqlSetMessage(pool string, id uint64, author string, m Message, ctime int64) error {
+func sqlSetMessage(pool string, id uint64, author string, m Message) error {
 	message, err := json.Marshal(m)
 	if core.IsErr(err, "cannot marshal chat message: %v") {
 		return err
 	}
 
-	_, err = sql.Exec("SET_CHAT_MESSAGE", sql.Args{"pool": pool, "id": id, "author": author, "message": message, "ctime": ctime})
+	_, err = sql.Exec("SET_CHAT_MESSAGE", sql.Args{"pool": pool, "id": id, "author": author, "message": message, "time": sql.EncodeTime(m.Time)})
 	core.IsErr(err, "cannot set message %d on db: %v", id)
 	return err
 }
 
-func sqlGetMessages(pool string, afterId uint64, beforeId uint64, limit int) ([]Message, error) {
+func sqlGetMessages(pool string, after, before time.Time, limit int) ([]Message, error) {
 	var messages []Message
-	rows, err := sql.Query("GET_CHAT_MESSAGES", sql.Args{"pool": pool, "afterId": afterId, "beforeId": beforeId, "limit": limit})
+	rows, err := sql.Query("GET_CHAT_MESSAGES", sql.Args{"pool": pool, "after": after.UnixMicro(), "before": before.UnixMicro(), "limit": limit})
 	if err == nil {
 		for rows.Next() {
 			var data []byte
@@ -36,15 +37,4 @@ func sqlGetMessages(pool string, afterId uint64, beforeId uint64, limit int) ([]
 	}
 
 	return messages, err
-}
-
-func sqlGetCTime(pool string) int64 {
-	var ctime int64
-	err := sql.QueryRow("GET_CHATS_CTIME", sql.Args{"pool": pool}, &ctime)
-	if err == nil {
-		return ctime
-	} else {
-		return 0
-	}
-
 }

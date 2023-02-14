@@ -115,19 +115,20 @@ func NewSFTP(connectionUrl string) (Exchanger, error) {
 	return &SFTP{c, base, repr, map[string]time.Time{}}, nil
 }
 
-func (s *SFTP) Touched(name string) bool {
-	touchFile := path.Join(s.base, fmt.Sprintf("%s.touch", name))
-	stat, err := s.Stat(touchFile)
+func (s *SFTP) GetCheckpoint(name string) int64 {
+	stat, err := s.Stat(name)
 	if err != nil {
-		return true
+		return -1
 	}
-	if stat.ModTime().After(s.touch[name]) {
-		if !core.IsErr(s.Write(touchFile, &bytes.Buffer{}), "cannot write touch file: %v") {
-			s.touch[name] = core.Now()
-		}
-		return true
+	return stat.ModTime().UnixMicro()
+}
+
+func (s *SFTP) SetCheckpoint(name string) (int64, error) {
+	err := s.Write(name, &bytes.Buffer{})
+	if core.IsErr(err, "cannot write checkpoint '%s': %v", name) {
+		return 0, err
 	}
-	return false
+	return s.GetCheckpoint(name), nil
 }
 
 func (s *SFTP) Read(name string, rang *Range, dest io.Writer) error {

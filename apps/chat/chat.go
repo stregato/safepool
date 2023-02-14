@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/code-to-go/safepool/apps/common"
 	"github.com/code-to-go/safepool/core"
 	pool "github.com/code-to-go/safepool/pool"
 	"github.com/code-to-go/safepool/security"
@@ -48,44 +49,6 @@ func Get(p *pool.Pool, name string) Chat {
 		Name: name,
 	}
 }
-
-func (c *Chat) TimeOffset(s *pool.Pool) int64 {
-	return sqlGetCTime(s.Name)
-}
-
-// func (c *Chat) Accept(s *pool.Pool, feed pool.Feed) bool {
-// 	name := feed.Name
-// 	if !strings.HasPrefix(name, "/chat/") || !strings.HasSuffix(name, ".chat") || feed.Size > 10*1024*1024 {
-// 		return false
-// 	}
-// 	name = path.Base(name)
-// 	id, err := strconv.ParseInt(name[0:len(name)-5], 10, 64)
-// 	if err != nil {
-// 		return false
-// 	}
-
-// 	buf := bytes.Buffer{}
-// 	err = s.Receive(feed.Id, nil, &buf)
-// 	if core.IsErr(err, "cannot read %s from %s: %v", feed.Name, s.Name) {
-// 		return true
-// 	}
-
-// 	var m Message
-// 	err = json.Unmarshal(buf.Bytes(), &m)
-// 	if core.IsErr(err, "invalid chat message %s: %v", feed.Name) {
-// 		return true
-// 	}
-
-// 	h := getHash(&m)
-// 	if !security.Verify(m.Author, h, m.Signature) {
-// 		logrus.Error("message %s has invalid signature", feed.Name)
-// 		return true
-// 	}
-
-// 	err = sqlSetMessage(s.Name, uint64(id), m.Author, m, feed.CTime)
-// 	core.IsErr(err, "cannot write message %s to db:%v", feed.Name)
-// 	return true
-// }
 
 func (c *Chat) SendMessage(contentType string, text string, binary []byte) (uint64, error) {
 	m := Message{
@@ -147,27 +110,30 @@ func (c *Chat) accept(h pool.Feed) {
 		return
 	}
 
-	err = sqlSetMessage(c.Pool.Name, uint64(id), m.Author, m, h.CTime)
+	err = sqlSetMessage(c.Pool.Name, uint64(id), m.Author, m)
 	core.IsErr(err, "cannot write message %s to db:%v", h.Name)
 }
 
-func (c *Chat) GetMessages(afterId, beforeId uint64, limit int) ([]Message, error) {
+func (c *Chat) GetMessages(after, before time.Time, limit int) ([]Message, error) {
 	c.Pool.Sync()
-	hs, err := c.Pool.List(sqlGetCTime(c.Pool.Name))
+	ctime := common.GetBreakpoint(c.Pool.Name, c.Name)
+	fs, err := c.Pool.List(ctime)
 	if core.IsErr(err, "cannot retrieve messages from pool: %v") {
 		return nil, err
 	}
-	for _, h := range hs {
-		c.accept(h)
+	for _, f := range fs {
+		c.accept(f)
+		ctime = f.CTime
 	}
+	common.SetBreakpoint(c.Pool.Name, c.Name, ctime)
 
-	messages, err := sqlGetMessages(c.Pool.Name, afterId, beforeId, limit)
+	messages, err := sqlGetMessages(c.Pool.Name, after, before, limit)
 	if core.IsErr(err, "cannot read messages from db: %v") {
 		return nil, err
 	}
 
 	sort.Slice(messages, func(i, j int) bool {
-		return messages[i].Id < messages[j].Id
+		return messages[i].Time.Before(messages[j].Time)
 	})
 	return messages, nil
 }

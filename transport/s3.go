@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"path"
 	"strings"
-	"time"
 
 	"github.com/code-to-go/safepool/core"
 
@@ -27,7 +26,6 @@ type S3 struct {
 	client *s3.Client
 	bucket string
 	url    string
-	touch  map[string]time.Time
 }
 
 type s3logger struct{}
@@ -81,7 +79,6 @@ func NewS3(connectionUrl string) (Exchanger, error) {
 		client: s3.NewFromConfig(cfg),
 		url:    repr,
 		bucket: bucket,
-		touch:  map[string]time.Time{},
 	}
 
 	err = s.createBucketIfNeeded()
@@ -105,22 +102,27 @@ func (s *S3) createBucketIfNeeded() error {
 	return err
 }
 
-func (s *S3) Touched(name string) bool {
-	touchFile := fmt.Sprintf("%s.touch", name)
+func (s *S3) GetCheckpoint(name string) int64 {
 	h, err := s.client.HeadObject(context.TODO(), &s3.HeadObjectInput{
 		Bucket: aws.String(s.bucket),
-		Key:    aws.String(touchFile),
+		Key:    aws.String(name),
 	})
 	if err != nil {
-		return true
+		return -1
 	}
-	if h.LastModified.After(s.touch[name]) {
-		if !core.IsErr(s.Write(touchFile, &bytes.Buffer{}), "cannot write touch file: %v") {
-			s.touch[name] = *h.LastModified
-		}
-		return true
+	return h.LastModified.UnixMicro()
+}
+
+func (s *S3) SetCheckpoint(name string) (int64, error) {
+	_, err := s.client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket: &s.bucket,
+		Key:    &name,
+		Body:   &bytes.Buffer{},
+	})
+	if core.IsErr(err, "cannot set checkpoint '%s'") {
+		return 0, err
 	}
-	return false
+	return s.GetCheckpoint(name), nil
 }
 
 func (s *S3) Read(name string, rang *Range, dest io.Writer) error {
@@ -159,19 +161,32 @@ func (s *S3) Write(name string, source io.Reader) error {
 }
 
 func (s *S3) ReadDir(dir string, opts ListOption) ([]fs.FileInfo, error) {
-	input := &s3.ListObjectsInput{
-		Bucket:    aws.String(s.bucket),
-		Prefix:    aws.String(dir + "/"),
+	input := &s3.ListObjectsV2Input{
+
+		Bucket: aws.String(s.bucket),
+		Prefix: aws.String(dir + "/"),
+		//		Prefix:    aws.String("ch.safepool/"),
 		Delimiter: aws.String("/"),
 	}
 
-	result, err := s.client.ListObjects(context.TODO(), input)
+	result, err := s.client.ListObjectsV2(context.TODO(), input)
 	if err != nil {
 		logrus.Errorf("cannot list %s/%s: %v", s.String(), dir, err)
 		return nil, err
 	}
 
 	var infos []fs.FileInfo
+
+	for _, item := range result.CommonPrefixes {
+		cut := len(path.Clean(dir))
+		name := strings.TrimRight((*item.Prefix)[cut+1:], "/")
+
+		infos = append(infos, simpleFileInfo{
+			name:  name,
+			isDir: true,
+		})
+	}
+
 	for _, item := range result.Contents {
 		cut := len(path.Clean(dir))
 		name := (*item.Key)[cut+1:]

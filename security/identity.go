@@ -95,16 +95,16 @@ func IdentityFromId(id string) (Identity, error) {
 		return Identity{}, err
 	}
 
-	if len(b) < ed25519.PublicKeySize+secp256k1PublicKeySize {
+	if len(b) != ed25519.PublicKeySize+secp256k1PublicKeySize {
 		return Identity{}, core.ErrInvalidId
 	}
 
 	return Identity{
 		SignatureKey: Key{
-			Public: b[1 : 1+ed25519.PublicKeySize],
+			Public: b[0:+ed25519.PublicKeySize],
 		},
 		EncryptionKey: Key{
-			Public: b[1+ed25519.PublicKeySize:],
+			Public: b[ed25519.PublicKeySize:],
 		},
 	}, nil
 }
@@ -119,8 +119,7 @@ func (i Identity) Base64() (string, error) {
 }
 
 func (i Identity) Id() string {
-	b := append([]byte{1}, i.SignatureKey.Public...)
-	b = append(b, i.EncryptionKey.Public...)
+	b := append(i.SignatureKey.Public, i.EncryptionKey.Public...)
 	b64 := base64.StdEncoding.EncodeToString(b)
 	return strings.ReplaceAll(b64, "/", "_")
 }
