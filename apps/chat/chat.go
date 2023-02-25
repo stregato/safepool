@@ -73,7 +73,7 @@ func (c *Chat) SendMessage(contentType string, text string, binary []byte) (uint
 
 	go func() {
 		name := fmt.Sprintf("%s/%d.chat", c.Name, m.Id)
-		_, err = c.Pool.Send(name, bytes.NewBuffer(data), nil)
+		_, err = c.Pool.Send(name, bytes.NewBuffer(data), int64(len(data)), nil)
 		core.IsErr(err, "cannot write chat message: %v")
 	}()
 
@@ -114,7 +114,7 @@ func (c *Chat) accept(h pool.Feed) {
 	core.IsErr(err, "cannot write message %s to db:%v", h.Name)
 }
 
-func (c *Chat) GetMessages(after, before time.Time, limit int) ([]Message, error) {
+func (c *Chat) Receive(after, before time.Time, limit int) ([]Message, error) {
 	c.Pool.Sync()
 	ctime := common.GetBreakpoint(c.Pool.Name, c.Name)
 	fs, err := c.Pool.List(ctime)
@@ -136,4 +136,9 @@ func (c *Chat) GetMessages(after, before time.Time, limit int) ([]Message, error
 		return messages[i].Time.Before(messages[j].Time)
 	})
 	return messages, nil
+}
+
+// Reset removes all the local content
+func (c *Chat) Reset() error {
+	return sqlReset(c.Pool.Name)
 }

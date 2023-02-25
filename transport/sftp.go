@@ -124,14 +124,14 @@ func (s *SFTP) GetCheckpoint(name string) int64 {
 }
 
 func (s *SFTP) SetCheckpoint(name string) (int64, error) {
-	err := s.Write(name, &bytes.Buffer{})
+	err := s.Write(name, &bytes.Buffer{}, 0, nil)
 	if core.IsErr(err, "cannot write checkpoint '%s': %v", name) {
 		return 0, err
 	}
 	return s.GetCheckpoint(name), nil
 }
 
-func (s *SFTP) Read(name string, rang *Range, dest io.Writer) error {
+func (s *SFTP) Read(name string, rang *Range, dest io.Writer, progress chan int64) error {
 	f, err := s.c.Open(path.Join(s.base, name))
 	if core.IsErr(err, "cannot open file on sftp server %v:%v", s) {
 		return err
@@ -166,7 +166,7 @@ func (s *SFTP) Read(name string, rang *Range, dest io.Writer) error {
 	return nil
 }
 
-func (s *SFTP) Write(name string, source io.Reader) error {
+func (s *SFTP) Write(name string, source io.Reader, size int64, progress chan int64) error {
 	name = path.Join(s.base, name)
 
 	f, err := s.c.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_TRUNC)
@@ -203,7 +203,24 @@ func (s *SFTP) Rename(old, new string) error {
 }
 
 func (s *SFTP) Delete(name string) error {
-	return s.c.Remove(path.Join(s.base, name))
+	n := path.Join(s.base, name)
+	stat, err := s.c.Stat(n)
+	if core.IsErr(err, "cannot stat %s in Delete: %v", n) {
+		return err
+	}
+
+	if stat.IsDir() {
+		is, _ := s.c.ReadDir(n)
+		for _, i := range is {
+			err = s.Delete(path.Join(name, i.Name()))
+			if err != nil {
+				return err
+			}
+		}
+	}
+	err = s.c.Remove(n)
+	core.IsErr(err, "cannot delete %s in Delete: %v", n)
+	return nil
 }
 
 func (s *SFTP) Close() error {

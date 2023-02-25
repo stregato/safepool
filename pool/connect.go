@@ -17,13 +17,13 @@ import (
 func pingExchanger(e transport.Exchanger, pool string, data []byte) (time.Duration, error) {
 	start := core.Now()
 	name := path.Join(pool, fmt.Sprintf(pingName, start.UnixMilli()))
-	err := e.Write(name, bytes.NewBuffer(data))
+	err := e.Write(name, bytes.NewBuffer(data), int64(len(data)), nil)
 	if err != nil {
 		return 0, err
 	}
 
 	var buf bytes.Buffer
-	err = e.Read(name, nil, &buf)
+	err = e.Read(name, nil, &buf, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -80,6 +80,7 @@ func (p *Pool) connectSafe(config Config) error {
 		logrus.Warnf("no available exchange for domain %s", p.Name)
 		return ErrNoExchange
 	} else {
+		p.Connection = p.e.String()
 		return nil
 	}
 }

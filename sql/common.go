@@ -123,9 +123,9 @@ func DecodeBase64(data string) []byte {
 }
 
 func EncodeTime(t time.Time) int64 {
-	return t.Unix()
+	return t.UnixMilli()
 }
 
 func DecodeTime(v int64) time.Time {
-	return time.Unix(v, 0)
+	return time.UnixMilli(v)
 }

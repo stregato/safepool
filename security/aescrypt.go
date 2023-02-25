@@ -72,6 +72,8 @@ func (sr *StreamReader) Read(p []byte) (n int, err error) {
 	}
 }
 
+const EncryptHeaderSize = 24
+
 // EncryptedWriter wraps w with an OFB cipher stream.
 func EncryptingReader(keyId uint64, keyFunc func(uint64) []byte, r io.Reader) (*StreamReader, error) {
 

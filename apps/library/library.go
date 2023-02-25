@@ -53,8 +53,8 @@ type Local struct {
 	AuthorId  string    `json:"authorId"`
 	ModTime   time.Time `json:"modTime"`
 	Size      uint64    `json:"size"`
-	Hash      []byte
-	HashChain [][]byte
+	Hash      []byte    `json:"hash"`
+	HashChain [][]byte  `json:"hashChain"`
 }
 
 type Version struct {
@@ -69,21 +69,21 @@ type Version struct {
 }
 
 type Document struct {
-	Name      string
-	AuthorId  string
-	LocalPath string
-	Id        uint64
-	ModTime   time.Time
-	State     State
-	Hash      []byte
-	HashChain [][]byte
-	Versions  []Version
+	Name      string    `json:"name"`
+	AuthorId  string    `json:"authorId"`
+	LocalPath string    `json:"localPath"`
+	Id        uint64    `json:"id"`
+	ModTime   time.Time `json:"modTime"`
+	State     State     `json:"state"`
+	Hash      []byte    `json:"hash"`
+	HashChain [][]byte  `json:"hashChain"`
+	Versions  []Version `json:"versions"`
 }
 
 type List struct {
-	Folder     string
-	Documents  []Document
-	Subfolders []string
+	Folder     string     `json:"folder"`
+	Documents  []Document `json:"documents"`
+	Subfolders []string   `json:"subfolders"`
 }
 
 type Library struct {
@@ -208,6 +208,7 @@ func (l *Library) getDocuments(files []File, locals []Local) ([]Document, error)
 
 // List returns the documents in provided folder
 func (l *Library) List(folder string) (List, error) {
+	l.Pool.Sync()
 	ctime := common.GetBreakpoint(l.Pool.Name, l.Name)
 	fs, _ := l.Pool.List(ctime)
 	for _, f := range fs {
@@ -355,7 +356,7 @@ func (l *Library) Send(localPath string, name string, solveConflicts bool, tags 
 	}
 	defer f.Close()
 
-	h, err := l.Pool.Send(path.Join(l.Name, name), f, m)
+	h, err := l.Pool.Send(path.Join(l.Name, name), f, stat.Size(), m)
 	if core.IsErr(err, "cannot post content to pool '%s': %v", l.Pool.Name) {
 		return pool.Feed{}, err
 	}
@@ -401,4 +402,9 @@ func (l *Library) accept(feed pool.Feed) {
 
 	err = sqlSetDocument(l.Pool.Name, l.Name, f)
 	core.IsErr(err, "cannot save document to db: %v")
+}
+
+// Reset removes all the local content
+func (l *Library) Reset() error {
+	return sqlReset(l.Pool.Name, l.Name)
 }

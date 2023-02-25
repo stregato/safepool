@@ -11,7 +11,7 @@ import (
 func testCreateFile(t *testing.T, s Exchanger) {
 	name := uuid.New().String()
 	r := bytes.NewReader(make([]byte, 1024))
-	assert.NoErrorf(t, s.Write(name, r), "cannot write file %s", name)
+	assert.NoErrorf(t, s.Write(name, r, 1024, nil), "cannot write file %s", name)
 	assert.NoErrorf(t, s.Delete(name), "cannot delete file %s", name)
 }
 

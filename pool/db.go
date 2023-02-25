@@ -218,3 +218,20 @@ func sqlListPool() ([]string, error) {
 	}
 	return names, err
 }
+
+func sqlReset(pool string) error {
+	_, err := sql.Exec("DELETE_FEEDS", sql.Args{"pool": pool})
+	if err == nil {
+		_, err = sql.Exec("DELETE_KEYS", sql.Args{"pool": pool})
+	}
+	if err == nil {
+		_, err = sql.Exec("DELETE_POOL", sql.Args{"name": pool})
+	}
+	if err == nil {
+		_, err = sql.Exec("DELETE_CHECKPOINT", sql.Args{"pool": pool})
+	}
+	if err == nil {
+		_, err = sql.Exec("DELETE_ACCESSES", sql.Args{"pool": pool})
+	}
+	return err
+}

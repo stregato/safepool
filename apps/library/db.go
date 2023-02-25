@@ -16,8 +16,8 @@ func sqlSetDocument(pool string, base string, d File) error {
 	_, err := sql.Exec("SET_LIBRARY_FILE", sql.Args{"pool": pool, "base": base, "id": d.Id, "name": d.Name,
 		"authorId": d.AuthorId, "modTime": sql.EncodeTime(d.ModTime), "size": d.Size,
 		"contentType": d.ContentType, "hash": sql.EncodeBase64(d.Hash), "hashChain": hashChain,
-		"offset": d.CTime, "folder": folder, "level": level})
-	if core.IsErr(err, "cannot set document %d on db: %v", d.Name) {
+		"ctime": d.CTime, "folder": folder, "level": level})
+	if core.IsErr(err, "cannot set document %s on db: %v", d.Name) {
 		return err
 	}
 
@@ -58,6 +58,9 @@ func getFolderAndLevel(folder string) (string, int) {
 	folder = strings.TrimPrefix(folder, ".")
 	folder = strings.Trim(folder, "/")
 	level := strings.Count(folder, "/")
+	if folder != "" {
+		level += 1
+	}
 	return folder, level
 }
 
@@ -180,4 +183,12 @@ func sqlGetFilesHashes(pool string, base string, name string, limit int) ([][]by
 		}
 	}
 	return hashes, nil
+}
+
+func sqlReset(pool string, base string) error {
+	_, err := sql.Exec("DELETE_LIBRARY_LOCALS", sql.Args{"pool": pool, "base": base})
+	if err == nil {
+		_, err = sql.Exec("DELETE_LIBRARY_FILES", sql.Args{"pool": pool, "base": base})
+	}
+	return err
 }

@@ -57,12 +57,12 @@ func Add(p *pool.Pool, i Invite) error {
 		return err
 	}
 	name := fmt.Sprintf("invite/%d", snowflake.ID())
-	_, err = p.Send(name, bytes.NewBuffer(bs), nil)
+	_, err = p.Send(name, bytes.NewBuffer(bs), int64(len(bs)), nil)
 	core.IsErr(err, "cannot send invite to pool '%s': %v", p.Name)
 	return err
 }
 
-func GetInvites(p *pool.Pool, since int64, onlyMine bool) ([]Invite, error) {
+func Receive(p *pool.Pool, after int64, onlyMine bool) ([]Invite, error) {
 	p.Sync()
 	ctime := common.GetBreakpoint(p.Name, "invite")
 	fs, _ := p.List(ctime)
@@ -71,7 +71,7 @@ func GetInvites(p *pool.Pool, since int64, onlyMine bool) ([]Invite, error) {
 		ctime = f.CTime
 	}
 	common.SetBreakpoint(p.Name, "invite", ctime)
-	return sqlGetInvites(p.Name, since, onlyMine)
+	return sqlGetInvites(p.Name, after, onlyMine)
 }
 
 func accept(p *pool.Pool, f pool.Feed) {

@@ -21,7 +21,7 @@ func sqlSetMessage(pool string, id uint64, author string, m Message) error {
 
 func sqlGetMessages(pool string, after, before time.Time, limit int) ([]Message, error) {
 	var messages []Message
-	rows, err := sql.Query("GET_CHAT_MESSAGES", sql.Args{"pool": pool, "after": after.UnixMicro(), "before": before.UnixMicro(), "limit": limit})
+	rows, err := sql.Query("GET_CHAT_MESSAGES", sql.Args{"pool": pool, "after": sql.EncodeTime(after), "before": sql.EncodeTime(before), "limit": limit})
 	if err == nil {
 		for rows.Next() {
 			var data []byte
@@ -37,4 +37,9 @@ func sqlGetMessages(pool string, after, before time.Time, limit int) ([]Message,
 	}
 
 	return messages, err
+}
+
+func sqlReset(pool string) error {
+	_, err := sql.Exec("DELETE_CHAT", sql.Args{"pool": pool})
+	return err
 }

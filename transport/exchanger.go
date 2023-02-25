@@ -37,10 +37,10 @@ type Exchanger interface {
 	GetCheckpoint(name string) int64
 
 	// Read reads data from a file into a writer
-	Read(name string, rang *Range, dest io.Writer) error
+	Read(name string, rang *Range, dest io.Writer, progress chan int64) error
 
 	// Write writes data to a file name. An existing file is overwritten
-	Write(name string, source io.Reader) error
+	Write(name string, source io.Reader, size int64, progress chan int64) error
 
 	//ReadDir returns the entries of a folder content
 	ReadDir(name string, opts ListOption) ([]fs.FileInfo, error)

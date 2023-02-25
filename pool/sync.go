@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/code-to-go/safepool/core"
+	"github.com/code-to-go/safepool/security"
 )
 
 const FeedsFolder = "feeds"
@@ -82,6 +83,15 @@ func (p *Pool) Sync() ([]Feed, error) {
 			if core.IsErr(err, "cannot read file %s from %s: %v", n, p.e) {
 				continue
 			}
+
+			_, ok, _ := security.GetIdentity(f.AuthorId)
+			if !ok {
+				err = p.importIdentity(f.AuthorId)
+				if err != nil {
+					continue
+				}
+			}
+
 			f.Slot = slot
 			f.CTime = p.getCTime()
 			_ = sqlAddFeed(p.Name, f)

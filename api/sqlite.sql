@@ -84,6 +84,9 @@ INSERT INTO feeds(pool,id,name,modTime,size,authorId,hash,meta,slot,ctime) VALUE
 -- DEL_FEED_BEFORE
 DELETE FROM feeds WHERE pool=:pool AND id <:beforeId
 
+-- DELETE_FEEDS
+DELETE FROM feeds WHERE pool=:pool
+
 -- INIT
 CREATE TABLE IF NOT EXISTS keys (
     pool VARCHAR(128) NOT NULL, 
@@ -103,6 +106,9 @@ INSERT INTO keys(pool,keyId,keyValue) VALUES(:pool,:keyId,:keyValue)
     ON CONFLICT(pool,keyId) DO UPDATE SET keyValue=:keyValue
 	    WHERE pool=:pool AND keyId=:keyId
 
+-- DELETE_KEYS
+DELETE FROM keys WHERE pool=:pool
+
 -- INIT
 CREATE TABLE IF NOT EXISTS pools (
     name VARCHAR(512),
@@ -121,6 +127,9 @@ INSERT INTO pools(name,configs) VALUES(:name,:configs)
     ON CONFLICT(name) DO UPDATE SET configs=:configs
 	    WHERE name=:name
 
+-- DELETE_POOL
+DELETE FROM pools WHERE name=:name
+
 -- INIT
 CREATE TABLE IF NOT EXISTS checkpoints (
     pool VARCHAR(512),
@@ -137,6 +146,9 @@ INSERT INTO checkpoints(pool,tag,slot,modTime) VALUES(:pool,:tag,:slot,:modTime)
 
 -- GET_CHECKPOINT
 SELECT slot,modTime FROM checkpoints WHERE pool=:pool AND tag=:tag
+
+-- DELETE_CHECKPOINT
+DELETE FROM checkpoints WHERE pool=:pool 
 
 -- INIT
 CREATE TABLE IF NOT EXISTS accesses (
@@ -165,6 +177,9 @@ INSERT INTO accesses(pool,id,state,modTime,ts) VALUES(:pool,:id,:state,:modTime,
 -- DEL_GRANT
 DELETE FROM accesses WHERE id=:id AND pool=:pool
 
+-- DELETE_ACCESSES
+DELETE FROM accesses WHERE pool=:pool
+
 -- INIT
 CREATE TABLE IF NOT EXISTS chats (
     pool VARCHAR(128),
@@ -182,6 +197,9 @@ INSERT INTO chats(pool,id,author,time,message) VALUES(:pool,:id,:author,:time,:m
 
 -- GET_CHAT_MESSAGES
 SELECT message FROM chats WHERE pool=:pool AND time > :after AND time < :before ORDER BY time DESC LIMIT :limit
+
+-- DELETE_CHAT
+DELETE FROM chats WHERE pool=:pool 
 
 -- INIT
 CREATE TABLE IF NOT EXISTS library_files (
@@ -254,6 +272,12 @@ SELECT name,path,id,authorId,modTime,size,hash,hashChain FROM library_locals WHE
 
 -- GET_LIBRARY_LOCAL
 SELECT name,path,id,authorId,modTime,size,hash,hashChain FROM library_locals WHERE pool=:pool AND base=:base AND name=:name
+
+-- DELETE_LIBRARY_LOCALS
+DELETE FROM library_locals WHERE pool=:pool AND base=:base
+
+-- DELETE_LIBRARY_FILES
+DELETE FROM library_files WHERE pool=:pool AND base=:base
 
 -- INIT
 CREATE TABLE IF NOT EXISTS invites (

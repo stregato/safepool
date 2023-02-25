@@ -35,10 +35,11 @@ type Consumer interface {
 }
 
 type Pool struct {
-	Name    string            `json:"name"`
-	Self    security.Identity `json:"self"`
-	Apps    []string          `json:"apps"`
-	Trusted bool              `json:"trusted"`
+	Name       string            `json:"name"`
+	Self       security.Identity `json:"self"`
+	Apps       []string          `json:"apps"`
+	Trusted    bool              `json:"trusted"`
+	Connection string            `json:"connection"`
 
 	e                transport.Exchanger
 	exchangers       []transport.Exchanger
@@ -110,11 +111,10 @@ func Create(self security.Identity, name string, apps []string) (*Pool, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !ForceCreation {
-		_, err = p.e.Stat(path.Join(p.Name, ".access"))
-		if err == nil {
-			return nil, ErrAlreadyExist
-		}
+
+	err = p.checkExisting()
+	if err != nil {
+		return nil, err
 	}
 
 	p.masterKeyId = snowflake.ID()
@@ -144,7 +144,7 @@ func Create(self security.Identity, name string, apps []string) (*Pool, error) {
 		return nil, err
 	}
 
-	p.replica()
+	go func() { p.replica() }()
 	return p, err
 }
 
@@ -187,11 +187,11 @@ func (p *Pool) List(ctime int64) ([]Feed, error) {
 	return hs, err
 }
 
-func (p *Pool) Send(name string, r io.Reader, meta []byte) (Feed, error) {
+func (p *Pool) Send(name string, r io.Reader, size int64, meta []byte) (Feed, error) {
 	id := snowflake.ID()
 	slot := core.Now().Format(FeedDateFormat)
 	n := path.Join(p.Name, FeedsFolder, slot, fmt.Sprintf("%d.body", id))
-	hr, err := p.writeFile(n, r)
+	hr, err := p.writeFile(n, r, size)
 	if core.IsErr(err, "cannot post file %s to %s: %v", name, p.e) {
 		return Feed{}, err
 	}
@@ -219,7 +219,7 @@ func (p *Pool) Send(name string, r io.Reader, meta []byte) (Feed, error) {
 	}
 
 	n = path.Join(p.Name, FeedsFolder, slot, fmt.Sprintf("%d.head", id))
-	_, err = p.writeFile(n, bytes.NewBuffer(data))
+	_, err = p.writeFile(n, bytes.NewBuffer(data), int64(len(data)))
 	core.IsErr(err, "cannot write header %s.head in %s: %v", name, p.e)
 
 	return f, nil
@@ -257,10 +257,10 @@ func (p *Pool) Receive(id uint64, rang *transport.Range, w io.Writer) error {
 func (p *Pool) Sub(sub string, ids []string, apps []string) (Config, error) {
 	var name string
 	parts := strings.Split(p.Name, "/")
-	if len(parts) > 2 && parts[len(parts)-2] == "subs" {
+	if len(parts) > 2 && parts[len(parts)-2] == "@" {
 		name = fmt.Sprintf("%s/%s", strings.Join(parts[0:len(parts)-2], "/"), sub)
 	} else {
-		name = fmt.Sprintf("%s/branches/%s", p.Name, sub)
+		name = fmt.Sprintf("%s/@/%s", p.Name, sub)
 	}
 
 	c := Config{
@@ -288,25 +288,15 @@ func (p *Pool) Sub(sub string, ids []string, apps []string) (Config, error) {
 }
 
 func (p *Pool) Close() {
-	// if p.houseKeeping != nil {
-	// 	p.stopHouseKeeping <- true
-	// 	p.houseKeepingLock.Lock()
-	// 	defer p.houseKeepingLock.Unlock()
-	// }
-
 	for _, e := range p.exchangers {
 		_ = e.Close()
 	}
 }
 
-func (p *Pool) Delete() error {
+func (p *Pool) Delete() {
 	for _, e := range p.exchangers {
-		err := e.Delete(p.Name)
-		if err != nil {
-			return err
-		}
+		e.Delete(p.Name)
 	}
-	return nil
 }
 
 func (p *Pool) Users() ([]security.Identity, error) {
@@ -338,6 +328,14 @@ func (p *Pool) SetAccess(userId string, state State) error {
 	}
 
 	return p.exportAccessFile()
+}
+
+func (p *Pool) Leave() error {
+	err := sqlReset(p.Name)
+	if core.IsErr(err, "cannot reset pool %s: %v", p) {
+		return err
+	}
+	return nil
 }
 
 func (p *Pool) ToString() string {

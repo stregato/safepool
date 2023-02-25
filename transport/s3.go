@@ -3,10 +3,12 @@ package transport
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/url"
+	"os"
 	"path"
 	"strings"
 
@@ -15,10 +17,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/smithy-go/logging"
+	"github.com/aws/smithy-go"
 
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+
+	"github.com/aws/smithy-go/logging"
 	"github.com/sirupsen/logrus"
 )
 
@@ -125,7 +128,7 @@ func (s *S3) SetCheckpoint(name string) (int64, error) {
 	return s.GetCheckpoint(name), nil
 }
 
-func (s *S3) Read(name string, rang *Range, dest io.Writer) error {
+func (s *S3) Read(name string, rang *Range, dest io.Writer, progress chan int64) error {
 	var r *string
 	if rang != nil {
 		r = aws.String(fmt.Sprintf("byte%d-%d", rang.From, rang.To))
@@ -149,12 +152,40 @@ func (s *S3) Read(name string, rang *Range, dest io.Writer) error {
 	return nil
 }
 
-func (s *S3) Write(name string, source io.Reader) error {
+func (s *S3) Write(name string, source io.Reader, size int64, progress chan int64) error {
+	if _, ok := source.(io.ReadSeeker); !ok {
+		if size < 1024*1024 {
+			var b bytes.Buffer
+
+			_, err := io.Copy(&b, source)
+			if core.IsErr(err, "cannot copy to temp memory block: %v") {
+				return err
+			}
+			source = bytes.NewReader(b.Bytes())
+		} else {
+			f, err := os.CreateTemp(os.TempDir(), "safepool")
+			if core.IsErr(err, "cannot create temp file: %v") {
+				return err
+			}
+			defer func() {
+				f.Close()
+				os.Remove(f.Name())
+			}()
+
+			_, err = io.Copy(f, source)
+			if core.IsErr(err, "cannot copy to temp file: %v") {
+				return err
+			}
+			f.Seek(0, 0)
+			source = f
+		}
+	}
 
 	_, err := s.client.PutObject(context.TODO(), &s3.PutObjectInput{
-		Bucket: &s.bucket,
-		Key:    &name,
-		Body:   source,
+		Bucket:        &s.bucket,
+		Key:           &name,
+		Body:          source,
+		ContentLength: size,
 	})
 	core.IsErr(err, "cannot write %s/%s: %v", s, name)
 	return err
@@ -209,13 +240,20 @@ func (s *S3) Stat(name string) (fs.FileInfo, error) {
 		Key:    &name,
 	})
 	if err != nil {
-		if aerr, ok := err.(awserr.Error); ok {
-			switch aerr.Code() {
-			case "NotFound": // s3.ErrCodeNoSuchKey does not work, aws is missing this error code so we hardwire a string
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) {
+			switch apiErr.ErrorCode() {
+			case "NotFound":
 				return nil, fs.ErrNotExist
 			default:
 				return nil, fs.ErrInvalid
 			}
+			// var oe *smithy.OperationError
+			// if errors.As(err, &oe) {
+			// 	switch oe.Error() {
+			// 	case "NotFound": // s3.ErrCodeNoSuchKey does not work, aws is missing this error code so we hardwire a string
+			// 		return nil, fs.ErrNotExist
+			// 	}
 		}
 		return nil, err
 	}

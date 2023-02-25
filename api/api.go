@@ -9,6 +9,7 @@ import (
 
 	"github.com/code-to-go/safepool/apps/chat"
 	"github.com/code-to-go/safepool/apps/invite"
+	"github.com/code-to-go/safepool/apps/library"
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/pool"
 	"github.com/code-to-go/safepool/security"
@@ -90,7 +91,7 @@ func SetNick(nick string) error {
 	return err
 }
 
-func CreatePool(c pool.Config, apps []string) error {
+func PoolCreate(c pool.Config, apps []string) error {
 	err := pool.Define(c)
 	if core.IsErr(err, "cannot define pool %v: %s", c.Name) {
 		return err
@@ -104,8 +105,8 @@ func CreatePool(c pool.Config, apps []string) error {
 	return nil
 }
 
-// JoinPool adds a pool by using the provided invite token
-func JoinPool(token string) (pool.Config, error) {
+// PoolJoin adds a pool by using the provided invite token
+func PoolJoin(token string) (pool.Config, error) {
 	i, err := invite.Decode(Self, token)
 	if core.IsErr(err, "invalid token: %v") {
 		return pool.Config{}, err
@@ -122,16 +123,22 @@ func JoinPool(token string) (pool.Config, error) {
 	return *i.Config, nil
 }
 
-// ValidateInvite checks the validity of the provided invite token and returns the token object
-func ValidateInvite(token string) (invite.Invite, error) {
-	i, err := invite.Decode(Self, token)
-	if core.IsErr(err, "invalid token: %v") {
-		return invite.Invite{}, err
+func PoolLeave(name string) error {
+	p, err := PoolGet(name)
+	if core.IsErr(err, "cannot get pool '%s'", name) {
+		return err
 	}
-	return i, err
+
+	c := chat.Get(p, "chat")
+	c.Reset()
+
+	l := library.Get(p, "library")
+	l.Reset()
+
+	return p.Leave()
 }
 
-func GetPool(name string) (*pool.Pool, error) {
+func PoolGet(name string) (*pool.Pool, error) {
 	v, ok := pools.Get(name)
 	if ok {
 		return v.(*pool.Pool), nil
@@ -146,8 +153,84 @@ func GetPool(name string) (*pool.Pool, error) {
 	return p, nil
 }
 
-func GetUsers(poolName string) ([]security.Identity, error) {
-	p, err := GetPool(poolName)
+func PoolSub(name string, sub string, ids []string, apps []string) (string, error) {
+	p, err := PoolGet(name)
+	if core.IsErr(err, "cannot get pool '%s': %v", name) {
+		return "", err
+	}
+
+	c, err := p.Sub(sub, ids, apps)
+	if core.IsErr(err, "cannot sub pool '%s': %v", name) {
+		return "", err
+	}
+
+	i := invite.Invite{
+		Config:       &c,
+		Sender:       p.Self,
+		RecipientIds: ids,
+	}
+
+	token, err := invite.Encode(i)
+	if core.IsErr(err, "cannot create token: %v") {
+		return "", err
+	}
+	return token, nil
+}
+
+func PoolInvite(name string, ids []string, invitePool string) (string, error) {
+	p, err := PoolGet(name)
+	if core.IsErr(err, "cannot get pool '%s' for invite", name) {
+		return "", err
+	}
+
+	var t *pool.Pool
+	if invitePool != "" {
+		t, err = PoolGet(invitePool)
+		if core.IsErr(err, "cannot get invite pool '%s'", name) {
+			return "", err
+		}
+	}
+
+	c, err := pool.GetConfig(name)
+	if core.IsErr(err, "cannot read config for '%s': %v", name) {
+		return "", err
+	}
+
+	for _, id := range ids {
+		err = p.SetAccess(id, pool.Active)
+		if core.IsErr(err, "cannot set access for id '%s' in pool '%s': %v", id, p.Name) {
+			return "", err
+		}
+	}
+
+	i := invite.Invite{
+		Config:       &c,
+		Sender:       p.Self,
+		RecipientIds: ids,
+	}
+
+	token, err := invite.Encode(i)
+	if core.IsErr(err, "cannot create token: %v") {
+		return "", err
+	}
+
+	if t != nil {
+		invite.Add(t, i)
+	}
+	return token, err
+}
+
+// PoolParseInvite checks the validity of the provided invite token and returns the token object
+func PoolParseInvite(token string) (invite.Invite, error) {
+	i, err := invite.Decode(Self, token)
+	if core.IsErr(err, "invalid token: %v") {
+		return invite.Invite{}, err
+	}
+	return i, err
+}
+
+func PoolUsers(poolName string) ([]security.Identity, error) {
+	p, err := PoolGet(poolName)
 	if core.IsErr(err, "cannot get pool '%s' for chat app", poolName) {
 		return nil, err
 	}
@@ -155,18 +238,18 @@ func GetUsers(poolName string) ([]security.Identity, error) {
 	return p.Users()
 }
 
-func GetMessages(poolName string, after, before time.Time, limit int) ([]chat.Message, error) {
-	p, err := GetPool(poolName)
+func ChatReceive(poolName string, after, before time.Time, limit int) ([]chat.Message, error) {
+	p, err := PoolGet(poolName)
 	if core.IsErr(err, "cannot get pool '%s' for chat app", poolName) {
 		return nil, err
 	}
 
 	ch := chat.Get(p, "chat")
-	return ch.GetMessages(after, before, limit)
+	return ch.Receive(after, before, limit)
 }
 
-func PostMessage(poolName string, contentType string, text string, bytes []byte) (uint64, error) {
-	p, err := GetPool(poolName)
+func ChatSend(poolName string, contentType string, text string, bytes []byte) (uint64, error) {
+	p, err := PoolGet(poolName)
 	if core.IsErr(err, "cannot get pool '%s' for chat app", poolName) {
 		return 0, err
 	}
@@ -179,6 +262,49 @@ func PostMessage(poolName string, contentType string, text string, bytes []byte)
 	return id, nil
 }
 
+func LibraryList(poolName string, folder string) (library.List, error) {
+	p, err := PoolGet(poolName)
+	if core.IsErr(err, "cannot get pool '%s' for chat app", poolName) {
+		return library.List{}, err
+	}
+
+	l := library.Get(p, "library")
+	ls, err := l.List(folder)
+	if core.IsErr(err, "cannot list folder '%s' in pool '%s': %v", folder, poolName) {
+		return library.List{}, err
+	}
+	return ls, err
+}
+
+func LibraryReceive(poolName string, id uint64, localPath string) error {
+	p, err := PoolGet(poolName)
+	if core.IsErr(err, "cannot get pool '%s' for chat app", poolName) {
+		return err
+	}
+
+	l := library.Get(p, "library")
+	_, err = l.Receive(id, localPath)
+	return err
+}
+
+func LibrarySend(poolName string, localPath string, name string, solveConflicts bool, tags ...string) error {
+	p, err := PoolGet(poolName)
+	if core.IsErr(err, "cannot get pool '%s' for library app", poolName) {
+		return err
+	}
+	l := library.Get(p, "library")
+	_, err = l.Send(localPath, name, solveConflicts, tags...)
+	return err
+}
+
+func InviteReceive(poolName string, after int64, onlyMine bool) ([]invite.Invite, error) {
+	p, err := PoolGet(poolName)
+	if core.IsErr(err, "cannot get pool '%s' for invite app", poolName) {
+		return nil, err
+	}
+	return invite.Receive(p, after, onlyMine)
+}
+
 type Notification struct {
 	Pool    string `json:"pool"`
 	App     string `json:"app"`
@@ -186,7 +312,7 @@ type Notification struct {
 	Count   int    `json:"count"`
 }
 
-func GetUpdates(ctime int64) []Notification {
+func Notifications(ctime int64) []Notification {
 	var ns []Notification
 
 	for _, name := range pool.List() {

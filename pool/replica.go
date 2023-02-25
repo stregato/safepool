@@ -1,6 +1,7 @@
 package pool
 
 import (
+	"os"
 	"path"
 
 	"github.com/code-to-go/safepool/core"
@@ -10,10 +11,17 @@ import (
 func (p *Pool) replica() {
 	for _, e := range p.exchangers {
 		if e != p.e {
-			_, err := p.sync(e)
-			if !core.IsErr(err, "cannot sync access between %s and %s: %v", p.e, e) {
-				p.syncContent(e)
+			_, err := e.Stat(path.Join(p.Name, ".access"))
+			if err == nil {
+				_, err = p.sync(e)
+				if core.IsErr(err, "cannot sync access between %s and %s: %v", p.e, e) {
+					continue
+				}
 			}
+			if err == nil || os.IsNotExist(err) {
+				err = p.syncContent(e)
+			}
+			core.IsErr(err, "cannot access %s during replica: %v", e)
 		}
 	}
 }
@@ -37,14 +45,17 @@ func (p *Pool) syncContent(e transport.Exchanger) error {
 		n := l.Name()
 		if n[0] != '.' && !m[n] {
 			n = path.Join(p.Name, n)
-			_ = transport.CopyFile(p.e, n, e, n)
+			_ = transport.CopyFile(p.e, n, e, n, l.Size())
 		}
 		delete(m, n)
 	}
 
 	for n := range m {
 		n = path.Join(p.Name, n)
-		err = transport.CopyFile(e, n, p.e, n)
+		stat, err := p.e.Stat(n)
+		if err == nil {
+			err = transport.CopyFile(e, n, p.e, n, stat.Size())
+		}
 		core.IsErr(err, "cannot clone '%s': %v", n)
 	}
 

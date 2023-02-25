@@ -63,6 +63,15 @@ func (p *Pool) syncIdentities() error {
 	return nil
 }
 
+func (p *Pool) importIdentity(id string) error {
+	name := path.Join(p.Name, IdentityFolder, id)
+	i, err := p.readIdentity(name)
+	if !core.IsErr(err, "cannot read identity from '%s': %v", name) {
+		security.SetIdentity(i)
+	}
+	return err
+}
+
 func (p *Pool) importIdentities() error {
 	ls, err := p.e.ReadDir(path.Join(p.Name, IdentityFolder), 0)
 	if core.IsErr(err, "cannot list files from %s: %v", p.e) {
@@ -87,11 +96,7 @@ func (p *Pool) importIdentities() error {
 
 		identity, ok := m[n]
 		if !ok || identity.Nick == "❓ Incognito..." || rand.Intn(100) > 95 {
-			name := path.Join(p.Name, IdentityFolder, n)
-			i, err := p.readIdentity(name)
-			if !core.IsErr(err, "cannot read identity from '%s': %v", name) {
-				security.SetIdentity(i)
-			}
+			p.importIdentity(n)
 		}
 	}
 	return nil

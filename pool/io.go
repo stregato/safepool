@@ -13,7 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func (p *Pool) writeFile(name string, r io.Reader) (*security.HashStream, error) {
+func (p *Pool) writeFile(name string, r io.Reader, size int64) (*security.HashStream, error) {
 	hr, err := security.NewHashStream(r, nil)
 	if core.IsErr(err, "cannot create hash reader: %v") {
 		return nil, err
@@ -24,7 +24,7 @@ func (p *Pool) writeFile(name string, r io.Reader) (*security.HashStream, error)
 		return nil, err
 	}
 
-	err = p.e.Write(name, er)
+	err = p.e.Write(name, er, size+security.EncryptHeaderSize, nil)
 	return hr, err
 }
 
@@ -38,7 +38,7 @@ func (p *Pool) readFile(name string, rang *transport.Range, w io.Writer) (*secur
 	if core.IsErr(err, "cannot create decrypting writer: %v") {
 		return nil, err
 	}
-	err = p.e.Read(name, rang, ew)
+	err = p.e.Read(name, rang, ew, nil)
 	return hw, err
 }
 
@@ -125,7 +125,7 @@ func (p *Pool) writeIdentity(name string, identity security.Identity) error {
 
 	data = append(data, 0)
 	data = append(data, sign...)
-	err = p.e.Write(name, bytes.NewBuffer(data))
+	err = p.e.Write(name, bytes.NewBuffer(data), int64(len(data)), nil)
 	core.IsErr(err, "cannot write '%s': %v", name)
 	return err
 }
@@ -134,7 +134,7 @@ func (p *Pool) readIdentity(name string) (security.Identity, error) {
 	var identity security.Identity
 	var buf bytes.Buffer
 
-	err := p.e.Read(name, nil, &buf)
+	err := p.e.Read(name, nil, &buf, nil)
 	if core.IsErr(err, "cannot read file %s: %v", name) {
 		return identity, err
 	}

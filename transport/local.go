@@ -45,14 +45,14 @@ func (l *Local) GetCheckpoint(name string) int64 {
 }
 
 func (l *Local) SetCheckpoint(name string) (int64, error) {
-	err := l.Write(name, &bytes.Buffer{})
+	err := l.Write(name, &bytes.Buffer{}, 0, nil)
 	if core.IsErr(err, "cannot write checkpoint '%s': %v", name) {
 		return 0, err
 	}
 	return l.GetCheckpoint(name), nil
 }
 
-func (l *Local) Read(name string, rang *Range, dest io.Writer) error {
+func (l *Local) Read(name string, rang *Range, dest io.Writer, progress chan int64) error {
 	f, err := os.Open(path.Join(l.base, name))
 	if core.IsErr(err, "cannot open file on %v:%v", l) {
 		return err
@@ -88,7 +88,7 @@ func createDir(n string) error {
 	return os.MkdirAll(filepath.Dir(n), 0755)
 }
 
-func (l *Local) Write(name string, source io.Reader) error {
+func (l *Local) Write(name string, source io.Reader, size int64, progress chan int64) error {
 	n := filepath.Join(l.base, name)
 	err := createDir(n)
 	if core.IsErr(err, "cannot create parent of %s: %v", n) {
