@@ -17,7 +17,7 @@ import (
 func pingExchanger(e transport.Exchanger, pool string, data []byte) (time.Duration, error) {
 	start := core.Now()
 	name := path.Join(pool, fmt.Sprintf(pingName, start.UnixMilli()))
-	err := e.Write(name, bytes.NewBuffer(data), int64(len(data)), nil)
+	err := e.Write(name, core.NewBytesReader(data), int64(len(data)), nil)
 	if err != nil {
 		return 0, err
 	}
@@ -45,7 +45,7 @@ func (p *Pool) createExchangers(config Config) {
 	urls := append(config.Public, config.Private...)
 	for _, url := range urls {
 		e, err := transport.NewExchanger(url)
-		if core.IsErr(err, "cannot connect to exchange %s: %v", url) {
+		if core.IsErr(err, "cannot connect to exchange %s in Pool.createExchangers: %v", url) {
 			continue
 		}
 		p.exchangers = append(p.exchangers, e)

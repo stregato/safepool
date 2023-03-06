@@ -51,12 +51,12 @@ func named(m Args) []any {
 }
 
 func trace(key string, m Args, err error) {
-	if logrus.IsLevelEnabled(logrus.InfoLevel) {
+	if logrus.IsLevelEnabled(logrus.TraceLevel) {
 		q := queriesCache[key]
 		for k, v := range m {
 			q = strings.ReplaceAll(q, ":"+k, fmt.Sprintf("%v", v))
 		}
-		logrus.Infof("SQL: %s: %v", q, err)
+		logrus.Tracef("SQL: %s: %v", q, err)
 	}
 }
 

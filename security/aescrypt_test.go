@@ -6,6 +6,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/code-to-go/safepool/core"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -14,12 +15,13 @@ func TestAESCrypt(t *testing.T) {
 	b := make([]byte, 1024)
 	rand.Read(b)
 
+	b = []byte("Hello")
 	key := GenerateBytesKey(32)
 	keyFunc := func(_ uint64) []byte {
 		return key
 	}
 
-	r := bytes.NewBuffer(b)
+	r := core.NewBytesReader(b)
 	er, _ := EncryptingReader(0, keyFunc, r)
 	w := &bytes.Buffer{}
 
@@ -42,18 +44,18 @@ func TestAESCryptAndHash(t *testing.T) {
 		return key
 	}
 
-	r := bytes.NewBuffer(b)
-	s1, _ := NewHashStream(r, nil)
+	r := core.NewBytesReader(b)
+	s1, _ := NewHashReader(r)
 	er, _ := EncryptingReader(0, keyFunc, s1)
 	w := &bytes.Buffer{}
 
 	io.Copy(w, er)
 
 	w2 := &bytes.Buffer{}
-	s2, _ := NewHashStream(nil, w)
+	s2, _ := NewHashWriter(w)
 	ew, _ := DecryptingWriter(keyFunc, s2)
 	io.Copy(ew, w)
 
 	assert.Equal(t, w2.Bytes(), b)
-	assert.Equal(t, s1.Hash(), s2.Hash())
+	assert.Equal(t, s1.Hash.Sum(nil), s2.Hash.Sum(nil))
 }

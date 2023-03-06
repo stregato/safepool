@@ -6,6 +6,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/code-to-go/safepool/core"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -14,15 +15,15 @@ func TestHashStream(t *testing.T) {
 	b := make([]byte, 1024)
 	rand.Read(b)
 
-	r := bytes.NewBuffer(b)
-	s, _ := NewHashStream(r, nil)
+	r := core.NewBytesReader(b)
+	hr, _ := NewHashReader(r)
 	w := &bytes.Buffer{}
 
-	io.Copy(w, s)
-	hash := s.Hash()
+	io.Copy(w, hr)
+	hash := hr.Hash.Sum(nil)
 
-	s, _ = NewHashStream(nil, &bytes.Buffer{})
-	io.Copy(s, w)
+	hw, _ := NewHashWriter(&bytes.Buffer{})
+	io.Copy(hw, w)
 
-	assert.Equal(t, hash, s.Hash())
+	assert.Equal(t, hash, hw.Hash.Sum(nil))
 }

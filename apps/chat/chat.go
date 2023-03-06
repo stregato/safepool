@@ -73,7 +73,7 @@ func (c *Chat) SendMessage(contentType string, text string, binary []byte) (uint
 
 	go func() {
 		name := fmt.Sprintf("%s/%d.chat", c.Name, m.Id)
-		_, err = c.Pool.Send(name, bytes.NewBuffer(data), int64(len(data)), nil)
+		_, err = c.Pool.Send(name, core.NewBytesReader(data), int64(len(data)), nil)
 		core.IsErr(err, "cannot write chat message: %v")
 	}()
 

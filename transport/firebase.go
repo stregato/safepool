@@ -12,17 +12,16 @@ import (
 	"github.com/code-to-go/safepool/core"
 )
 
-type LocalConfig struct {
+type FirebaseConfig struct {
 	Base string `json:"base" yaml:"base"`
 }
 
-type Local struct {
-	base  string
-	url   string
-	touch map[string]time.Time
+type Firebase struct {
+	base string
+	url  string
 }
 
-func NewLocal(connectionUrl string) (Exchanger, error) {
+func NewFirebase(connectionUrl string) (Exchanger, error) {
 	u, err := url.Parse(connectionUrl)
 	if core.IsErr(err, "invalid URL: %v") {
 		return nil, err
@@ -35,7 +34,7 @@ func NewLocal(connectionUrl string) (Exchanger, error) {
 	return &Local{base, connectionUrl, map[string]time.Time{}}, nil
 }
 
-func (l *Local) GetCheckpoint(name string) int64 {
+func (l *Firebase) GetCheckpoint(name string) int64 {
 	stat, err := l.Stat(name)
 	if err != nil {
 		return -1
@@ -43,7 +42,7 @@ func (l *Local) GetCheckpoint(name string) int64 {
 	return stat.ModTime().UnixMicro()
 }
 
-func (l *Local) SetCheckpoint(name string) (int64, error) {
+func (l *Firebase) SetCheckpoint(name string) (int64, error) {
 	err := l.Write(name, core.NewBytesReader(nil), 0, nil)
 	if core.IsErr(err, "cannot write checkpoint '%s': %v", name) {
 		return 0, err
@@ -51,7 +50,7 @@ func (l *Local) SetCheckpoint(name string) (int64, error) {
 	return l.GetCheckpoint(name), nil
 }
 
-func (l *Local) Read(name string, rang *Range, dest io.Writer, progress chan int64) error {
+func (l *Firebase) Read(name string, rang *Range, dest io.Writer, progress chan int64) error {
 	f, err := os.Open(path.Join(l.base, name))
 	if core.IsErr(err, "cannot open file on %v:%v", l) {
 		return err
@@ -83,11 +82,7 @@ func (l *Local) Read(name string, rang *Range, dest io.Writer, progress chan int
 	return nil
 }
 
-func createDir(n string) error {
-	return os.MkdirAll(filepath.Dir(n), 0755)
-}
-
-func (l *Local) Write(name string, source io.ReadSeeker, size int64, progress chan int64) error {
+func (l *Firebase) Write(name string, source io.ReadSeeker, size int64, progress chan int64) error {
 	n := filepath.Join(l.base, name)
 	err := createDir(n)
 	if core.IsErr(err, "cannot create parent of %s: %v", n) {
@@ -105,7 +100,7 @@ func (l *Local) Write(name string, source io.ReadSeeker, size int64, progress ch
 	return err
 }
 
-func (l *Local) ReadDir(dir string, opts ListOption) ([]fs.FileInfo, error) {
+func (l *Firebase) ReadDir(dir string, opts ListOption) ([]fs.FileInfo, error) {
 	result, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -122,22 +117,22 @@ func (l *Local) ReadDir(dir string, opts ListOption) ([]fs.FileInfo, error) {
 	return infos, nil
 }
 
-func (l *Local) Stat(name string) (os.FileInfo, error) {
+func (l *Firebase) Stat(name string) (os.FileInfo, error) {
 	return os.Stat(path.Join(l.base, name))
 }
 
-func (l *Local) Rename(old, new string) error {
+func (l *Firebase) Rename(old, new string) error {
 	return os.Rename(path.Join(l.base, old), path.Join(l.base, new))
 }
 
-func (l *Local) Delete(name string) error {
+func (l *Firebase) Delete(name string) error {
 	return os.Remove(path.Join(l.base, name))
 }
 
-func (l *Local) Close() error {
+func (l *Firebase) Close() error {
 	return nil
 }
 
-func (l *Local) String() string {
+func (l *Firebase) String() string {
 	return l.url
 }

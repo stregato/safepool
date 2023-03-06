@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"bytes"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -101,7 +100,7 @@ func NewSFTP(connectionUrl string) (Exchanger, error) {
 
 	client, err := ssh.Dial("tcp", addr, cc)
 	if err != nil {
-		return nil, fmt.Errorf("cannot connect to %s: %v", addr, err)
+		return nil, fmt.Errorf("cannot connect to %s in NewSFTP: %v", addr, err)
 	}
 	c, err := sftp.NewClient(client)
 	if err != nil {
@@ -124,7 +123,7 @@ func (s *SFTP) GetCheckpoint(name string) int64 {
 }
 
 func (s *SFTP) SetCheckpoint(name string) (int64, error) {
-	err := s.Write(name, &bytes.Buffer{}, 0, nil)
+	err := s.Write(name, core.NewBytesReader(nil), 0, nil)
 	if core.IsErr(err, "cannot write checkpoint '%s': %v", name) {
 		return 0, err
 	}
@@ -133,7 +132,7 @@ func (s *SFTP) SetCheckpoint(name string) (int64, error) {
 
 func (s *SFTP) Read(name string, rang *Range, dest io.Writer, progress chan int64) error {
 	f, err := s.c.Open(path.Join(s.base, name))
-	if core.IsErr(err, "cannot open file on sftp server %v:%v", s) {
+	if os.IsNotExist(err) || core.IsErr(err, "cannot open file on sftp server %v:%v", s) {
 		return err
 	}
 
@@ -166,7 +165,7 @@ func (s *SFTP) Read(name string, rang *Range, dest io.Writer, progress chan int6
 	return nil
 }
 
-func (s *SFTP) Write(name string, source io.Reader, size int64, progress chan int64) error {
+func (s *SFTP) Write(name string, source io.ReadSeeker, size int64, progress chan int64) error {
 	name = path.Join(s.base, name)
 
 	f, err := s.c.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_TRUNC)

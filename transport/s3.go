@@ -86,7 +86,7 @@ func NewS3(connectionUrl string) (Exchanger, error) {
 
 	err = s.createBucketIfNeeded()
 
-	return s, err
+	return s, s.mapError(err)
 }
 
 func (s *S3) createBucketIfNeeded() error {
@@ -102,7 +102,7 @@ func (s *S3) createBucketIfNeeded() error {
 	})
 	core.IsErr(err, "cannot create bucket %s: %v", s.bucket)
 
-	return err
+	return s.mapError(err)
 }
 
 func (s *S3) GetCheckpoint(name string) int64 {
@@ -129,58 +129,33 @@ func (s *S3) SetCheckpoint(name string) (int64, error) {
 }
 
 func (s *S3) Read(name string, rang *Range, dest io.Writer, progress chan int64) error {
-	var r *string
-	if rang != nil {
-		r = aws.String(fmt.Sprintf("byte%d-%d", rang.From, rang.To))
-	}
+	// var r *string
+	// if rang != nil {
+	// 	r = aws.String(fmt.Sprintf("byte%d-%d", rang.From, rang.To))
+	// }
 
 	rawObject, err := s.client.GetObject(context.TODO(), &s3.GetObjectInput{
 		Bucket: &s.bucket,
 		Key:    &name,
-		Range:  r,
+		//		Range:  r,
 	})
 	if err != nil {
-		logrus.Errorf("cannot read %s/%s: %v", s, name, err)
+		err = s.mapError(err)
+		if os.IsNotExist(err) || core.IsErr(err, "cannot read %s/%s: %v", s, name) {
+			return err
+		}
+	}
+
+	_, err = io.Copy(dest, rawObject.Body)
+	if core.IsErr(err, "cannot read %s/%s: %v", s, name) {
 		return err
 	}
 
-	// b, err := io.ReadAll(rawObject.Body)
-	// dest.Write(b)
-	io.Copy(dest, rawObject.Body)
-	// print(n)
 	rawObject.Body.Close()
 	return nil
 }
 
-func (s *S3) Write(name string, source io.Reader, size int64, progress chan int64) error {
-	if _, ok := source.(io.ReadSeeker); !ok {
-		if size < 1024*1024 {
-			var b bytes.Buffer
-
-			_, err := io.Copy(&b, source)
-			if core.IsErr(err, "cannot copy to temp memory block: %v") {
-				return err
-			}
-			source = bytes.NewReader(b.Bytes())
-		} else {
-			f, err := os.CreateTemp(os.TempDir(), "safepool")
-			if core.IsErr(err, "cannot create temp file: %v") {
-				return err
-			}
-			defer func() {
-				f.Close()
-				os.Remove(f.Name())
-			}()
-
-			_, err = io.Copy(f, source)
-			if core.IsErr(err, "cannot copy to temp file: %v") {
-				return err
-			}
-			f.Seek(0, 0)
-			source = f
-		}
-	}
-
+func (s *S3) Write(name string, source io.ReadSeeker, size int64, progress chan int64) error {
 	_, err := s.client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket:        &s.bucket,
 		Key:           &name,
@@ -188,7 +163,7 @@ func (s *S3) Write(name string, source io.Reader, size int64, progress chan int6
 		ContentLength: size,
 	})
 	core.IsErr(err, "cannot write %s/%s: %v", s, name)
-	return err
+	return s.mapError(err)
 }
 
 func (s *S3) ReadDir(dir string, opts ListOption) ([]fs.FileInfo, error) {
@@ -203,7 +178,7 @@ func (s *S3) ReadDir(dir string, opts ListOption) ([]fs.FileInfo, error) {
 	result, err := s.client.ListObjectsV2(context.TODO(), input)
 	if err != nil {
 		logrus.Errorf("cannot list %s/%s: %v", s.String(), dir, err)
-		return nil, err
+		return nil, s.mapError(err)
 	}
 
 	var infos []fs.FileInfo
@@ -234,28 +209,27 @@ func (s *S3) ReadDir(dir string, opts ListOption) ([]fs.FileInfo, error) {
 	return infos, nil
 }
 
+func (s *S3) mapError(err error) error {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.ErrorCode() {
+		case "NotFound", "NoSuchKey":
+			return fs.ErrNotExist
+		default:
+			return err
+		}
+	} else {
+		return err
+	}
+}
+
 func (s *S3) Stat(name string) (fs.FileInfo, error) {
 	feed, err := s.client.HeadObject(context.TODO(), &s3.HeadObjectInput{
 		Bucket: &s.bucket,
 		Key:    &name,
 	})
 	if err != nil {
-		var apiErr smithy.APIError
-		if errors.As(err, &apiErr) {
-			switch apiErr.ErrorCode() {
-			case "NotFound":
-				return nil, fs.ErrNotExist
-			default:
-				return nil, fs.ErrInvalid
-			}
-			// var oe *smithy.OperationError
-			// if errors.As(err, &oe) {
-			// 	switch oe.Error() {
-			// 	case "NotFound": // s3.ErrCodeNoSuchKey does not work, aws is missing this error code so we hardwire a string
-			// 		return nil, fs.ErrNotExist
-			// 	}
-		}
-		return nil, err
+		return nil, s.mapError(err)
 	}
 
 	return simpleFileInfo{
@@ -272,7 +246,7 @@ func (s *S3) Rename(old, new string) error {
 		CopySource: aws.String(url.QueryEscape(old)),
 		Key:        aws.String(new),
 	})
-	return err
+	return s.mapError(err)
 }
 
 func (s *S3) Delete(name string) error {
@@ -290,7 +264,7 @@ func (s *S3) Delete(name string) error {
 				Key:    item.Key,
 			})
 			if core.IsErr(err, "cannot delete %s: %v", item.Key) {
-				return err
+				return s.mapError(err)
 			}
 		}
 	} else {
@@ -301,7 +275,7 @@ func (s *S3) Delete(name string) error {
 	}
 
 	core.IsErr(err, "cannot delete %s: %v", name)
-	return err
+	return s.mapError(err)
 }
 
 func (s *S3) Close() error {

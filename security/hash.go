@@ -12,11 +12,17 @@ import (
 
 //type Hash256 [blake2b.Size256]byte
 
-type HashStream struct {
-	r     io.Reader
-	w     io.Writer
-	size  int64
-	block hash.Hash
+type HashReader struct {
+	r io.ReadSeekCloser
+
+	size int64
+	Hash hash.Hash
+}
+
+type HashWriter struct {
+	w    io.Writer
+	size int64
+	Hash hash.Hash
 }
 
 func NewHash() hash.Hash {
@@ -27,50 +33,64 @@ func NewHash() hash.Hash {
 	return h
 }
 
-func NewHashStream(r io.Reader, w io.Writer) (*HashStream, error) {
+func NewHashReader(r io.ReadSeekCloser) (*HashReader, error) {
 	b, err := blake2b.New256(nil)
 	if core.IsErr(err, "cannot create black hash: %v") {
 		return nil, err
 	}
-	return &HashStream{
-		block: b,
-		r:     r,
-		w:     w,
+	return &HashReader{
+		Hash: b,
+		r:    r,
 	}, nil
 }
 
-func (s *HashStream) Read(p []byte) (n int, err error) {
+func NewHashWriter(w io.Writer) (*HashWriter, error) {
+	b, err := blake2b.New256(nil)
+	if core.IsErr(err, "cannot create black hash: %v") {
+		return nil, err
+	}
+	return &HashWriter{
+		Hash: b,
+		w:    w,
+	}, nil
+}
+
+func (s *HashReader) Read(p []byte) (n int, err error) {
 	if s.r == nil {
 		return 0, os.ErrClosed
 	}
 
 	n, err = s.r.Read(p)
 	if err == nil && n > 0 {
-		_, err = s.block.Write(p[0:n])
+		_, err = s.Hash.Write(p[0:n])
 	}
 	s.size += int64(n)
 	return n, err
 }
 
-func (s *HashStream) Write(p []byte) (n int, err error) {
+func (s *HashReader) Seek(offset int64, whence int) (int64, error) {
+	if s.r == nil {
+		return 0, os.ErrClosed
+	} else {
+		return s.r.Seek(offset, whence)
+	}
+}
+
+func (s *HashReader) Close() error {
+	return s.r.Close()
+}
+
+func (s *HashWriter) Write(p []byte) (n int, err error) {
 	if s.w == nil {
 		return 0, os.ErrClosed
 	}
 
 	n, err = s.w.Write(p)
 	if err == nil && n > 0 {
-		_, err = s.block.Write(p[0:n])
+		_, err = s.Hash.Write(p[0:n])
 	}
 	s.size += int64(n)
 	return n, err
-}
-
-func (s *HashStream) Hash() []byte {
-	return s.block.Sum(nil)
-}
-
-func (s *HashStream) Size() int64 {
-	return s.size
 }
 
 func FileHash(name string) ([]byte, error) {

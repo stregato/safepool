@@ -6,6 +6,7 @@ import (
 
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/security"
+	"github.com/code-to-go/safepool/transport"
 )
 
 // func (p *Pool) list(prefix string, offset int) ([]Head, error) {
@@ -16,10 +17,10 @@ import (
 // 	return hs, err
 // }
 
-func (p *Pool) readHead(name string) (Feed, error) {
+func (p *Pool) readHead(e transport.Exchanger, name string) (Feed, error) {
 	var b bytes.Buffer
-	_, err := p.readFile(name, nil, &b)
-	if core.IsErr(err, "cannot read header of %s in %s: %v", name, p.e) {
+	_, err := p.readFile(e, name, nil, &b)
+	if core.IsErr(err, "cannot read header of %s in %s: %v", name, e) {
 		return Feed{}, err
 	}
 

@@ -38,8 +38,9 @@ func SetDbName(dbName string) {
 	sql.DbPath = dbName
 }
 
-func Start(dbPath string) error {
+func Start(dbPath string, availableBandwith pool.Bandwidth) error {
 	sql.InitDDL = sqlliteDDL
+	pool.AvailableBandwidth = availableBandwith
 
 	err := sql.OpenDB(dbPath)
 	if core.IsErr(err, "cannot open DB: %v") {
@@ -115,6 +116,7 @@ func PoolJoin(token string) (pool.Config, error) {
 	if i.Config == nil {
 		return pool.Config{}, core.ErrNotAuthorized
 	}
+	PoolLeave(i.Config.Name)
 	err = i.Join()
 	if core.IsErr(err, "cannot join pool '%s': %v", i.Config.Name) {
 		return *i.Config, err
@@ -135,6 +137,7 @@ func PoolLeave(name string) error {
 	l := library.Get(p, "library")
 	l.Reset()
 
+	pools.Delete(name)
 	return p.Leave()
 }
 
@@ -287,6 +290,17 @@ func LibraryReceive(poolName string, id uint64, localPath string) error {
 	return err
 }
 
+func LibrarySave(poolName string, id uint64, dest string) error {
+	p, err := PoolGet(poolName)
+	if core.IsErr(err, "cannot get pool '%s' for chat app", poolName) {
+		return err
+	}
+
+	l := library.Get(p, "library")
+	err = l.Save(id, dest)
+	return err
+}
+
 func LibrarySend(poolName string, localPath string, name string, solveConflicts bool, tags ...string) error {
 	p, err := PoolGet(poolName)
 	if core.IsErr(err, "cannot get pool '%s' for library app", poolName) {
@@ -342,4 +356,24 @@ func Notifications(ctime int64) []Notification {
 	}
 
 	return ns
+}
+
+func Dump() map[string]any {
+	m := map[string]any{}
+
+	var poolsDumps []map[string]any
+	for _, i := range pools.Items() {
+		p := i.Object.(*pool.Pool)
+		poolsDumps = append(poolsDumps, p.Dump())
+	}
+	m["pools"] = poolsDumps
+	m["availableBandwidth"] = pool.AvailableBandwidth
+
+	var logBuilder strings.Builder
+	for _, l := range core.RecentLog {
+		logBuilder.WriteString(l)
+		logBuilder.WriteRune('\n')
+	}
+	m["log"] = logBuilder.String()
+	return m
 }

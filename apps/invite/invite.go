@@ -57,7 +57,7 @@ func Add(p *pool.Pool, i Invite) error {
 		return err
 	}
 	name := fmt.Sprintf("invite/%d", snowflake.ID())
-	_, err = p.Send(name, bytes.NewBuffer(bs), int64(len(bs)), nil)
+	_, err = p.Send(name, core.NewBytesReader(bs), int64(len(bs)), nil)
 	core.IsErr(err, "cannot send invite to pool '%s': %v", p.Name)
 	return err
 }

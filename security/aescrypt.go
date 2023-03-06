@@ -7,10 +7,11 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"errors"
+	"fmt"
 	"io"
 
 	"github.com/code-to-go/safepool/core"
+	"github.com/uhthomas/seekctr"
 
 	"github.com/zenazn/pkcs7pad"
 )
@@ -56,28 +57,62 @@ func DecryptBlock(key []byte, nonce []byte, cipherdata []byte) ([]byte, error) {
 }
 
 type StreamReader struct {
-	loc    int
+	loc    int64
 	header []byte
-	r      cipher.StreamReader
+	r      *seekctr.Reader
 }
 
+const AESHeaderSize = 8 + aes.BlockSize
+
 func (sr *StreamReader) Read(p []byte) (n int, err error) {
-	if sr.loc < 8+aes.BlockSize {
+	if sr.loc < AESHeaderSize {
 		m := copy(p[sr.loc:], sr.header)
-		sr.loc += m
 		n, err = sr.r.Read(p[m:])
+		if err == nil {
+			sr.loc += int64(m + n)
+		}
 		return m + n, err
 	} else {
-		return sr.r.Read(p)
+		n, err := sr.r.Read(p)
+		sr.loc += int64(n)
+		return n, err
 	}
 }
 
-const EncryptHeaderSize = 24
+func (sr *StreamReader) Close() error {
+	return sr.r.Close()
+}
+
+func (sr *StreamReader) Seek(offset int64, whence int) (int64, error) {
+	switch whence {
+	case io.SeekStart:
+		sr.loc = offset
+	case io.SeekCurrent:
+		sr.loc += offset
+
+	case io.SeekEnd:
+		loc, err := sr.r.Seek(offset, whence)
+		if err == nil {
+			sr.loc = loc + AESHeaderSize
+			return sr.loc, nil
+		} else {
+			return 0, err
+		}
+	}
+
+	if sr.loc < AESHeaderSize {
+		_, err := sr.r.Seek(0, 0)
+		return offset, err
+	} else {
+		_, err := sr.r.Seek(sr.loc-AESHeaderSize, 0)
+		return sr.loc - AESHeaderSize, err
+	}
+}
 
 // EncryptedWriter wraps w with an OFB cipher stream.
-func EncryptingReader(keyId uint64, keyFunc func(uint64) []byte, r io.Reader) (*StreamReader, error) {
+func EncryptingReader(keyId uint64, keyFunc func(uint64) []byte, r io.ReadSeekCloser) (io.ReadSeekCloser, error) {
 
-	header := make([]byte, 8+aes.BlockSize)
+	header := make([]byte, AESHeaderSize)
 	binary.LittleEndian.PutUint64(header, keyId)
 
 	// generate random initial value
@@ -85,20 +120,20 @@ func EncryptingReader(keyId uint64, keyFunc func(uint64) []byte, r io.Reader) (*
 		return nil, err
 	}
 
-	value := keyFunc(keyId)
-	if value == nil {
-		return nil, errors.New("unknown encryption key")
+	key := keyFunc(keyId)
+	if key == nil {
+		return nil, fmt.Errorf("unknown encryption key %d in #EncryptingReader", keyId)
 	}
 
-	block, err := newBlock(value)
-	if err != nil {
+	iv := header[8:]
+	reader, err := seekctr.NewReader(r, key, iv)
+	if core.IsErr(err, "cannot create encryption reader: %v") {
 		return nil, err
 	}
 
-	stream := cipher.NewOFB(block, header[8:])
 	return &StreamReader{
 		header: header,
-		r:      cipher.StreamReader{S: stream, R: r},
+		r:      reader,
 	}, nil
 }
 
@@ -106,32 +141,32 @@ type StreamWriter struct {
 	loc     int
 	header  []byte
 	keyFunc func(uint64) []byte
-	w       *cipher.StreamWriter
+	ew      *seekctr.Writer
+	w       io.Writer
 }
 
 func (sr *StreamWriter) Write(p []byte) (n int, err error) {
-	if sr.w.S == nil {
+	if sr.ew == nil {
 		m := copy(sr.header[sr.loc:], p)
 		sr.loc += m
 
 		if sr.loc == 8+aes.BlockSize {
 			keyId := binary.LittleEndian.Uint64(sr.header)
-			value := sr.keyFunc(keyId)
-			if value == nil {
-				return 0, errors.New("unknown encryption key")
-			}
-
-			block, err := newBlock(value)
-			if err != nil {
-				return 0, err
+			key := sr.keyFunc(keyId)
+			if key == nil {
+				return 0, fmt.Errorf("unknown encryption key %d in #StreamWriter.Write", keyId)
 			}
 
 			iv := sr.header[8:]
-			sr.w.S = cipher.NewOFB(block, iv)
+			sr.ew, err = seekctr.NewWriter(sr.w, key, iv)
+			if err != nil {
+				return 0, err
+			}
 		}
-		return sr.w.Write(p[m:])
+		n, err := sr.ew.Write(p[m:])
+		return n + m, err
 	} else {
-		return sr.w.Write(p)
+		return sr.ew.Write(p)
 	}
 }
 
@@ -140,7 +175,7 @@ func DecryptingWriter(keyFunc func(uint64) []byte, w io.Writer) (*StreamWriter, 
 	return &StreamWriter{
 		keyFunc: keyFunc,
 		header:  make([]byte, 8+aes.BlockSize),
-		w:       &cipher.StreamWriter{S: nil, W: w},
+		w:       w,
 	}, nil
 }
 

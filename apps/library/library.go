@@ -172,7 +172,7 @@ func (l *Library) getDocuments(files []File, locals []Local) ([]Document, error)
 		}
 
 		switch {
-		case d.LocalPath == "":
+		case d.LocalPath == "" || d.State == Deleted:
 			v.State = Updated
 		case f.Id == d.Id:
 			continue
@@ -354,8 +354,6 @@ func (l *Library) Send(localPath string, name string, solveConflicts bool, tags 
 	if core.IsErr(err, "cannot open '%s': %v", localPath) {
 		return pool.Feed{}, err
 	}
-	defer f.Close()
-
 	h, err := l.Pool.Send(path.Join(l.Name, name), f, stat.Size(), m)
 	if core.IsErr(err, "cannot post content to pool '%s': %v", l.Pool.Name) {
 		return pool.Feed{}, err

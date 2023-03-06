@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"hash"
 	"math/rand"
+	"os"
 	"path"
 	"time"
 
@@ -33,6 +34,7 @@ type AccessKey struct {
 
 type AccessFile struct {
 	Version     float32
+	PoolId      uint64
 	AccessKeys  []AccessKey
 	Nonce       []byte
 	MasterKeyId uint64
@@ -42,20 +44,57 @@ type AccessFile struct {
 
 const IdentityFolder = "identities"
 
-func (p *Pool) syncIdentities() error {
+func (p *Pool) SetAccess(userId string, state State) error {
+	_, ok, _ := security.GetIdentity(userId)
+	if !ok {
+		identity, err := security.IdentityFromId(userId)
+		if core.IsErr(err, "id '%s' is invalid: %v") {
+			return err
+		}
+		identity.Nick = ""
+		err = security.SetIdentity(identity)
+		if core.IsErr(err, "cannot save identity '%s' to db: %v", identity) {
+			return err
+		}
+	}
+
+	err := p.sqlSetAccess(Access{
+		Id:      userId,
+		State:   state,
+		ModTime: core.Now(),
+	})
+	if core.IsErr(err, "cannot link identity '%s' to pool '%s': %v", userId, p.Name) {
+		return err
+	}
+
+	err = p.exportAccessFile(p.e)
+	go func() {
+		p.mutex.Lock()
+		defer p.mutex.Unlock()
+
+		for _, e := range p.exchangers {
+			if e != p.e {
+				p.exportAccessFile(e)
+			}
+		}
+	}()
+	return err
+}
+
+func (p *Pool) syncIdentities(e transport.Exchanger) error {
 	security.SetIdentity(p.Self)
 	security.Trust(p.Self, true)
 
 	name := path.Join(p.Name, IdentityFolder, p.Self.Id())
-	_, err := p.e.Stat(name)
+	_, err := e.Stat(name)
 	if err != nil {
-		err = p.writeIdentity(name, p.Self)
+		err = p.writeIdentity(e, name, p.Self)
 		if core.IsErr(err, "cannot write identity to '%s': %v", name) {
 			return err
 		}
 	}
 
-	err = p.importIdentities()
+	err = p.importIdentities(e)
 	if core.IsErr(err, "cannot import identities: %v") {
 		return err
 	}
@@ -63,18 +102,18 @@ func (p *Pool) syncIdentities() error {
 	return nil
 }
 
-func (p *Pool) importIdentity(id string) error {
+func (p *Pool) importIdentity(e transport.Exchanger, id string) error {
 	name := path.Join(p.Name, IdentityFolder, id)
-	i, err := p.readIdentity(name)
+	i, err := p.readIdentity(e, name)
 	if !core.IsErr(err, "cannot read identity from '%s': %v", name) {
 		security.SetIdentity(i)
 	}
 	return err
 }
 
-func (p *Pool) importIdentities() error {
-	ls, err := p.e.ReadDir(path.Join(p.Name, IdentityFolder), 0)
-	if core.IsErr(err, "cannot list files from %s: %v", p.e) {
+func (p *Pool) importIdentities(e transport.Exchanger) error {
+	ls, err := e.ReadDir(path.Join(p.Name, IdentityFolder), 0)
+	if core.IsErr(err, "cannot list files from %s: %v", e) {
 		return err
 	}
 
@@ -95,21 +134,52 @@ func (p *Pool) importIdentities() error {
 		}
 
 		identity, ok := m[n]
-		if !ok || identity.Nick == "❓ Incognito..." || rand.Intn(100) > 95 {
-			p.importIdentity(n)
+		if !ok || identity.Nick == "" || rand.Intn(100) > 95 {
+			p.importIdentity(e, n)
 		}
 	}
 	return nil
 }
 
-func (p *Pool) sync(e transport.Exchanger) (hash.Hash, error) {
+func (p *Pool) syncAccess() error {
+	_, err := p.syncAccessFor(p.e)
+	if err != nil {
+		return err
+	}
+
+	if AvailableBandwidth >= MediumBandwidth {
+		go func() {
+			p.mutex.Lock()
+			for _, e := range p.exchangers {
+				if e != p.e {
+					p.syncAccessFor(e)
+				}
+			}
+			p.mutex.Unlock()
+		}()
+	}
+	return err
+}
+
+func (p *Pool) syncAccessFor(e transport.Exchanger) (hash.Hash, error) {
+	core.Info("sync access for %s", e.String())
+	err := p.syncIdentities(e)
+	if core.IsErr(err, "cannot sync own identity: %v") {
+		return nil, err
+	}
+
 	l, err := p.lockAccessFile(e)
 	if core.IsErr(err, "cannot lock access on %s: %v", p.e) {
 		return nil, err
 	}
 	defer p.unlockAccessFile(e, l)
 
-	a, h, err := p.readAccessFile(e)
+	a, h, err := p.readAccessFile(e, ".access")
+	if os.IsNotExist(err) {
+		err = p.exportAccessFile(e)
+		return h, err
+	}
+
 	if core.IsErr(err, "cannot read access file:%v") {
 		return nil, err
 	}
@@ -120,7 +190,7 @@ func (p *Pool) sync(e transport.Exchanger) (hash.Hash, error) {
 	}
 
 	requireExport, err := p.syncAccesses(a)
-	if core.IsErr(err, "cannot sync accesss: %v") {
+	if core.IsErr(err, "cannot sync access: %v") {
 		return nil, err
 	}
 
@@ -131,13 +201,14 @@ func (p *Pool) sync(e transport.Exchanger) (hash.Hash, error) {
 
 	p.accessHash = h.Sum(nil)
 	if requireExport {
-		err = p.exportAccessFile()
+		err = p.exportAccessFile(e)
 		return h, err
 	}
+
 	return h, nil
 }
 
-func (p *Pool) exportAccessFile() error {
+func (p *Pool) exportAccessFile(e transport.Exchanger) error {
 	identities, accesses, err := p.sqlGetAccesses(false)
 	if core.IsErr(err, "cannot read identities from db for '%s': %v", p.Name) {
 		return err
@@ -166,13 +237,14 @@ func (p *Pool) exportAccessFile() error {
 
 	a := AccessFile{
 		Version:     1.0,
+		PoolId:      p.Id,
 		AccessKeys:  accessKeys,
 		Nonce:       nonce,
 		MasterKeyId: p.masterKeyId,
 		Keystore:    keystore,
 		Apps:        p.Apps,
 	}
-	_, err = p.writeAccessFile(p.e, a)
+	_, err = p.writeAccessFile(e, a)
 	if core.IsErr(err, "cannot write access file: %v") {
 		return err
 	}

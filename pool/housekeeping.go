@@ -1,11 +1,10 @@
 package pool
 
 import (
-	"fmt"
 	"log"
 	"path"
+	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/code-to-go/safepool/core"
@@ -14,33 +13,7 @@ import (
 )
 
 // LifeSpan is the maximal time data should stay in the pool. It is default to 30 days.
-var LifeSpan = time.Hour //30 * 24 * time.Hour
-
-// func (p *Pool) startHouseKeeping() {
-// 	if LifeSpan < sevenDays {
-// 		LifeSpan = sevenDays
-// 	}
-
-// 	LifeSpan = time.Hour
-
-// 	go func() {
-// 		rand.Seed(time.Now().UnixNano())
-// 		n := rand.Intn(600)
-// 		time.Sleep(time.Duration(n) * time.Second)
-// 		p.stopHouseKeeping = make(chan bool)
-// 		p.houseKeeping = time.NewTicker(time.Hour)
-
-// 		for {
-// 			p.HouseKeeping()
-// 			select {
-// 			case <-p.stopHouseKeeping:
-// 				return
-// 			case <-p.houseKeeping.C:
-// 				continue
-// 			}
-// 		}
-// 	}()
-// }
+var LifeSpan = 30 * 24 * time.Hour
 
 func (p *Pool) getAllSlots(e transport.Exchanger) []string {
 	fs, err := e.ReadDir(path.Join(p.Name, FeedsFolder), 0)
@@ -57,9 +30,12 @@ func (p *Pool) getAllSlots(e transport.Exchanger) []string {
 // HouseKeeping removes old files from the pool. It is called automatically when you use Sync after an hour;
 // use explicitly only when your application does not use sync or does not live longer than 1 hour
 func (p *Pool) HouseKeeping() {
-	p.houseKeepingLock.Lock()
-	defer p.houseKeepingLock.Unlock()
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
 
+	start := core.Now()
+
+	var deletedFiles int
 	thresoldId := p.BaseId()
 	for _, e := range p.exchangers {
 		slots := p.getAllSlots(e)
@@ -70,25 +46,28 @@ func (p *Pool) HouseKeeping() {
 			}
 			for _, f := range fs {
 				name := f.Name()
-				if !strings.HasSuffix(name, ".head") {
-					continue
-				}
 
-				name = name[0 : len(name)-len(".head")]
+				ext := filepath.Ext(name)
+				name = name[0 : len(name)-len(ext)]
 				id, err := strconv.ParseInt(name, 10, 64)
 				if err != nil {
 					continue
 				}
 
 				if uint64(id) < thresoldId {
-					p.e.Delete(path.Join(p.Name, FeedsFolder, slot, fmt.Sprintf("%s.head", name)))
-					p.e.Delete(path.Join(p.Name, FeedsFolder, slot, fmt.Sprintf("%s.body", name)))
+					err = e.Delete(path.Join(p.Name, FeedsFolder, slot, name))
+					if core.IsErr(err, "cannot delete '%s' during housekeeping: %v", name) {
+						continue
+					}
+					deletedFiles++
 				}
 			}
 		}
 	}
 
-	sqlDelFeedBefore(p.Name, int64(thresoldId))
+	err := sqlDelFeedBefore(p.Name, int64(thresoldId))
+	core.IsErr(err, "cannot delete feeds from DB with id < %d", thresoldId)
+	core.Info("housekeeping completed with %d files deleted in %v", deletedFiles, core.Since(start))
 }
 
 func (p *Pool) BaseId() uint64 {

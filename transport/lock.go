@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"os"
 	"time"
 
 	"github.com/code-to-go/safepool/core"
@@ -21,6 +22,10 @@ func waitLock(e Exchanger, name string) {
 
 	for shot.IsZero() && core.Since(shot) > c.Span {
 		id = c.Id
+		_, err = e.Stat(name)
+		if os.IsNotExist(err) {
+			return
+		}
 		err = ReadJSON(e, name, &c, nil)
 		if err != nil {
 			return
@@ -56,6 +61,10 @@ func LockFile(e Exchanger, name string, span time.Duration) (uint64, error) {
 
 func UnlockFile(e Exchanger, name string, id uint64) {
 	var c lockFileContent
+	_, err := e.Stat(name)
+	if os.IsNotExist(err) {
+		return
+	}
 	_ = ReadJSON(e, name, &c, nil)
 	if c.Id == id {
 		e.Delete(name)

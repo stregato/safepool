@@ -16,11 +16,13 @@ import "C"
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/code-to-go/safepool/api"
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/pool"
+	"github.com/sirupsen/logrus"
 	"github.com/skratchdot/open-golang/open"
 )
 
@@ -50,9 +52,21 @@ func cInput(err error, i *C.char, v any) error {
 }
 
 //export start
-func start(dbPath *C.char) C.Result {
+func start(dbPath *C.char, availableBandwith *C.char) C.Result {
+	var ab pool.Bandwidth
 	p := C.GoString(dbPath)
-	return cResult(nil, api.Start(p))
+	switch C.GoString(availableBandwith) {
+	case "low":
+		ab = pool.LowBandwidth
+	case "medium":
+		ab = pool.MediumBandwidth
+	case "high":
+		ab = pool.HighBandwith
+	default:
+		cResult(nil, fmt.Errorf("invalid bandwidth option %s. Valid options are low, medium, high", C.GoString(availableBandwith)))
+	}
+
+	return cResult(nil, api.Start(p, ab))
 }
 
 //export stop
@@ -193,6 +207,13 @@ func libraryReceive(poolName *C.char, id C.long, localPath *C.char) C.Result {
 	return cResult(nil, err)
 }
 
+//export librarySave
+func librarySave(poolName *C.char, id C.long, localPath *C.char) C.Result {
+	p, l := C.GoString(poolName), C.GoString(localPath)
+	err := api.LibrarySave(p, uint64(id), l)
+	return cResult(nil, err)
+}
+
 //export librarySend
 func librarySend(poolName *C.char, localPath *C.char, name *C.char, solveConflicts C.int, tagsList *C.char) C.Result {
 	p, l, n := C.GoString(poolName), C.GoString(localPath), C.GoString(name)
@@ -224,4 +245,33 @@ func notifications(ctime C.long) C.Result {
 //export fileOpen
 func fileOpen(filePath *C.char) C.Result {
 	return cResult(nil, open.Start(C.GoString(filePath)))
+}
+
+//export dump
+func dump() C.Result {
+	d := api.Dump()
+	return cResult(d, nil)
+}
+
+//export setLogLevel
+func setLogLevel(level C.int) C.Result {
+	logrus.SetLevel(logrus.Level(level))
+	core.Info("log level set to %d", level)
+	return cResult(nil, nil)
+}
+
+//export setAvailableBandwidth
+func setAvailableBandwidth(availableBandwidth *C.char) C.Result {
+	switch C.GoString(availableBandwidth) {
+	case "low":
+		pool.AvailableBandwidth = pool.LowBandwidth
+	case "medium":
+		pool.AvailableBandwidth = pool.MediumBandwidth
+	case "high":
+		pool.AvailableBandwidth = pool.HighBandwith
+	default:
+		cResult(nil, fmt.Errorf("invalid bandwidth option %s. Valid options are low, medium, high", C.GoString(availableBandwidth)))
+	}
+
+	return cResult(nil, nil)
 }

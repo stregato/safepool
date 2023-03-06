@@ -36,7 +36,7 @@ func TestSafeCreation(t *testing.T) {
 	assert.NoErrorf(t, err, "Cannot define pool: %v", err)
 
 	ForceCreation = true
-	ReplicaPeriod = 0
+	HouseKeepingPeriod = 0
 	s, err := Create(self, "test.safepool.net/public", nil)
 	assert.NoErrorf(t, err, "Cannot create pool: %v", err)
 	s.Close()
@@ -46,7 +46,7 @@ func TestSafeCreation(t *testing.T) {
 	defer s.Close()
 
 	s1 := "just a simple test"
-	h, err := s.Send("test.txt", bytes.NewBufferString(s1), int64(len(s1)), nil)
+	h, err := s.Send("test.txt", core.NewStringReader(s1), int64(len(s1)), nil)
 	assert.NoErrorf(t, err, "Cannot create post: %v", err)
 
 	b2 := bytes.Buffer{}
@@ -77,7 +77,7 @@ func BenchmarkSafe(b *testing.B) {
 	assert.NoErrorf(b, err, "Cannot define pool: %v", err)
 
 	ForceCreation = true
-	ReplicaPeriod = 0
+	HouseKeepingPeriod = 0
 	s, err := Create(self, "test.safepool.net/public", nil)
 	assert.NoErrorf(b, err, "Cannot create pool: %v", err)
 	s.Close()
@@ -87,7 +87,7 @@ func BenchmarkSafe(b *testing.B) {
 	defer s.Close()
 
 	s1 := "just a simple test"
-	h, err := s.Send("test.txt", bytes.NewBufferString(s1), int64(len(s1)), nil)
+	h, err := s.Send("test.txt", core.NewStringReader(s1), int64(len(s1)), nil)
 	assert.NoErrorf(b, err, "Cannot create post: %v", err)
 
 	b2 := bytes.Buffer{}
@@ -118,7 +118,7 @@ func TestSafeReplica(t *testing.T) {
 	assert.NoErrorf(t, err, "Cannot define pool: %v", err)
 
 	ForceCreation = true
-	ReplicaPeriod = time.Second * 5
+	HouseKeepingPeriod = time.Second * 5
 
 	now := core.Now()
 	s, err := Create(self, "test.safepool.net/public", nil)
@@ -129,7 +129,7 @@ func TestSafeReplica(t *testing.T) {
 
 	s1 := "just a simple test"
 	now = core.Now()
-	_, err = s.Send("test.txt", bytes.NewBufferString(s1), int64(len(s1)), nil)
+	_, err = s.Send("test.txt", core.NewStringReader(s1), int64(len(s1)), nil)
 	postTime := core.Since(now)
 	assert.NoErrorf(t, err, "Cannot create post: %v", err)
 

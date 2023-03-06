@@ -40,7 +40,7 @@ type Exchanger interface {
 	Read(name string, rang *Range, dest io.Writer, progress chan int64) error
 
 	// Write writes data to a file name. An existing file is overwritten
-	Write(name string, source io.Reader, size int64, progress chan int64) error
+	Write(name string, source io.ReadSeeker, size int64, progress chan int64) error
 
 	//ReadDir returns the entries of a folder content
 	ReadDir(name string, opts ListOption) ([]fs.FileInfo, error)

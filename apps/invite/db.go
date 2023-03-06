@@ -49,13 +49,3 @@ func sqlGetInvites(pool string, since int64, mustBeValid bool) ([]Invite, error)
 	}
 	return invites, nil
 }
-
-func sqlGetCTime(pool string) int64 {
-	var ctime int64
-	err := sql.QueryRow("GET_INVITE_CTIME", sql.Args{"pool": pool}, &ctime)
-	if err == nil {
-		return ctime
-	} else {
-		return -1
-	}
-}

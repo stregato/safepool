@@ -1,24 +1,25 @@
 package pool
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"path"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/security"
 	"github.com/code-to-go/safepool/transport"
-
-	"github.com/godruoyi/go-snowflake"
 )
 
-const SafeConfigFile = ".safepool-pool.json"
+type Bandwidth int
+
+const (
+	LowBandwidth Bandwidth = iota
+	MediumBandwidth
+	HighBandwith
+)
+
+var AvailableBandwidth Bandwidth = HighBandwith
 
 var ErrNoExchange = errors.New("no Exchange available")
 var ErrNotTrusted = errors.New("the author is not a trusted user")
@@ -36,6 +37,7 @@ type Consumer interface {
 
 type Pool struct {
 	Name       string            `json:"name"`
+	Id         uint64            `json:"id"`
 	Self       security.Identity `json:"self"`
 	Apps       []string          `json:"apps"`
 	Trusted    bool              `json:"trusted"`
@@ -45,20 +47,13 @@ type Pool struct {
 	exchangers       []transport.Exchanger
 	masterKeyId      uint64
 	masterKey        []byte
+	lastAccessSync   time.Time
 	lastHouseKeeping time.Time
 	accessHash       []byte
 	config           Config
 	ctime            int64
-	houseKeepingLock sync.Mutex
+	mutex            sync.Mutex
 }
-
-// type User2 struct {
-// 	security.Identity
-// 	//Since is the keyId used when the identity was added to the Pool access
-// 	Since uint64
-// 	//AddedOn is the timestamp when the identity is stored on the local DB
-// 	AddedOn time.Time
-// }
 
 type Feed struct {
 	Id        uint64
@@ -79,7 +74,7 @@ const (
 )
 
 var ForceCreation = false
-var ReplicaPeriod = time.Hour
+var HouseKeepingPeriod = 10 * time.Minute
 var CacheSizeMB = 16
 var FeedDateFormat = "20060102"
 
@@ -94,87 +89,6 @@ func List() []string {
 	return names
 }
 
-// Create creates a new pool on the defined exchanges
-func Create(self security.Identity, name string, apps []string) (*Pool, error) {
-	config, err := sqlGetPool(name)
-	if core.IsErr(err, "unknown pool %s: %v", name) {
-		return nil, err
-	}
-
-	p := &Pool{
-		Name:             name,
-		Self:             self,
-		lastHouseKeeping: core.Now(),
-		config:           config,
-	}
-	err = p.connectSafe(config)
-	if err != nil {
-		return nil, err
-	}
-
-	err = p.checkExisting()
-	if err != nil {
-		return nil, err
-	}
-
-	p.masterKeyId = snowflake.ID()
-	p.masterKey = security.GenerateBytesKey(32)
-	err = p.sqlSetKey(p.masterKeyId, p.masterKey)
-	if core.IsErr(err, "çannot store master encryption key to db: %v") {
-		return nil, err
-	}
-
-	access := Access{
-		Id:      self.Id(),
-		State:   Active,
-		ModTime: core.Now(),
-	}
-	err = p.sqlSetAccess(access)
-	if core.IsErr(err, "cannot link identity to pool '%s': %v", p.Name) {
-		return nil, err
-	}
-
-	err = p.syncIdentities()
-	if core.IsErr(err, "cannot sync own identity: %v") {
-		return nil, err
-	}
-
-	err = p.exportAccessFile()
-	if core.IsErr(err, "cannot export access file for pool '%s': %v", name) {
-		return nil, err
-	}
-
-	go func() { p.replica() }()
-	return p, err
-}
-
-// Init initialized a domain on the specified exchangers
-func Open(self security.Identity, name string) (*Pool, error) {
-	config, err := sqlGetPool(name)
-	if core.IsErr(err, "unknown pool %s: %v", name) {
-		return nil, err
-	}
-	p := &Pool{
-		Name:   name,
-		Self:   self,
-		config: config,
-	}
-	err = p.connectSafe(config)
-	if err != nil {
-		return nil, err
-	}
-
-	err = p.syncIdentities()
-	if core.IsErr(err, "cannot sync own identity: %v") {
-		return nil, err
-	}
-
-	_, err = p.sync(p.e)
-
-	//	p.startHouseKeeping()
-	return p, err
-}
-
 type AcceptFunc func(feed Feed)
 
 const All = ""
@@ -187,147 +101,25 @@ func (p *Pool) List(ctime int64) ([]Feed, error) {
 	return hs, err
 }
 
-func (p *Pool) Send(name string, r io.Reader, size int64, meta []byte) (Feed, error) {
-	id := snowflake.ID()
-	slot := core.Now().Format(FeedDateFormat)
-	n := path.Join(p.Name, FeedsFolder, slot, fmt.Sprintf("%d.body", id))
-	hr, err := p.writeFile(n, r, size)
-	if core.IsErr(err, "cannot post file %s to %s: %v", name, p.e) {
-		return Feed{}, err
-	}
-
-	hash := hr.Hash()
-	signature, err := security.Sign(p.Self, hash)
-	if core.IsErr(err, "cannot sign file %s.body in %s: %v", name, p.e) {
-		return Feed{}, err
-	}
-	f := Feed{
-		Id:        id,
-		Name:      name,
-		Size:      hr.Size(),
-		Hash:      hash,
-		ModTime:   core.Now(),
-		AuthorId:  p.Self.Id(),
-		Signature: signature,
-		Meta:      meta,
-		Slot:      slot,
-		CTime:     core.Now().Unix(),
-	}
-	data, err := json.Marshal(f)
-	if core.IsErr(err, "cannot marshal header to json: %v") {
-		return Feed{}, err
-	}
-
-	n = path.Join(p.Name, FeedsFolder, slot, fmt.Sprintf("%d.head", id))
-	_, err = p.writeFile(n, bytes.NewBuffer(data), int64(len(data)))
-	core.IsErr(err, "cannot write header %s.head in %s: %v", name, p.e)
-
-	return f, nil
-}
-
-func (p *Pool) Receive(id uint64, rang *transport.Range, w io.Writer) error {
-	f, err := sqlGetFeed(p.Name, id)
-	if core.IsErr(err, "cannot retrieve %d from pool %v: %v", id, p) {
-		return err
-	}
-
-	bodyName := path.Join(p.Name, FeedsFolder, f.Slot, fmt.Sprintf("%d.body", id))
-	cached, err := p.getFromCache(bodyName, rang, w)
-	if cached {
-		return err
-	}
-	cw, err := p.cacheWriter(bodyName, w)
-	if err == nil {
-		defer cw.Close()
-		w = cw
-	}
-
-	hr, err := p.readFile(bodyName, rang, w)
-	if core.IsErr(err, "cannot read body '%s': %v", bodyName) {
-		return err
-	}
-	hash := hr.Hash()
-	if !bytes.Equal(hash, f.Hash) {
-		return security.ErrInvalidSignature
-	}
-
-	return nil
-}
-
-func (p *Pool) Sub(sub string, ids []string, apps []string) (Config, error) {
-	var name string
-	parts := strings.Split(p.Name, "/")
-	if len(parts) > 2 && parts[len(parts)-2] == "@" {
-		name = fmt.Sprintf("%s/%s", strings.Join(parts[0:len(parts)-2], "/"), sub)
-	} else {
-		name = fmt.Sprintf("%s/@/%s", p.Name, sub)
-	}
-
-	c := Config{
-		Name:    name,
-		Public:  p.config.Public,
-		Private: p.config.Private,
-	}
-
-	err := Define(c)
-	if core.IsErr(err, "cannot define Forked pool %s: %v", name) {
-		return Config{}, err
-	}
-
-	p2, err := Create(p.Self, name, apps)
-	if core.IsErr(err, "cannot create Forked pool %s: %v", name) {
-		return Config{}, err
-	}
-	defer p2.Close()
-
-	for _, id := range ids {
-		p2.SetAccess(id, Active)
-	}
-
-	return c, nil
-}
-
 func (p *Pool) Close() {
+	p.mutex.Lock()
 	for _, e := range p.exchangers {
 		_ = e.Close()
 	}
+	p.mutex.Unlock()
 }
 
 func (p *Pool) Delete() {
+	p.mutex.Lock()
 	for _, e := range p.exchangers {
 		e.Delete(p.Name)
 	}
+	p.mutex.Unlock()
 }
 
 func (p *Pool) Users() ([]security.Identity, error) {
 	identities, _, err := p.sqlGetAccesses(false)
 	return identities, err
-}
-
-func (p *Pool) SetAccess(userId string, state State) error {
-	_, ok, _ := security.GetIdentity(userId)
-	if !ok {
-		identity, err := security.IdentityFromId(userId)
-		if core.IsErr(err, "id '%s' is invalid: %v") {
-			return err
-		}
-		identity.Nick = "❓ Incognito..."
-		err = security.SetIdentity(identity)
-		if core.IsErr(err, "cannot save identity '%s' to db: %v", identity) {
-			return err
-		}
-	}
-
-	err := p.sqlSetAccess(Access{
-		Id:      userId,
-		State:   state,
-		ModTime: core.Now(),
-	})
-	if core.IsErr(err, "cannot link identity '%s' to pool '%s': %v", userId, p.Name) {
-		return err
-	}
-
-	return p.exportAccessFile()
 }
 
 func (p *Pool) Leave() error {
