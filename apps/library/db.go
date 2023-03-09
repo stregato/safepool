@@ -45,7 +45,7 @@ func sqlGetDocumentByArgs(key string, args sql.Args) (File, bool, error) {
 	return d, true, nil
 }
 
-func sqlGetDocumentById(pool string, base string, id uint64) (File, bool, error) {
+func sqlGetFileById(pool string, base string, id uint64) (File, bool, error) {
 	return sqlGetDocumentByArgs("GET_LIBRARY_FILE_BY_ID", sql.Args{"pool": pool, "base": base, "id": id})
 }
 

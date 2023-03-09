@@ -78,6 +78,32 @@ func Start(dbPath string, availableBandwith pool.Bandwidth) error {
 	}
 
 	pools = cache.New(time.Hour, time.Hour)
+	pools.OnEvicted(func(name string, p interface{}) {
+		core.Info("closing pool %s", name)
+		p.(*pool.Pool).Close()
+	})
+	return err
+}
+
+func Stop() error {
+	pools.Flush()
+	err := sql.CloseDB()
+	core.IsErr(err, "cannot close db '%s': %v", sql.DbPath)
+	return err
+}
+
+func FactoryReset() error {
+	err := Stop()
+	if core.IsErr(err, "cannot stop application: %v") {
+		return err
+	}
+	err = sql.DeleteDB()
+	if core.IsErr(err, "cannot delete db '%s': %v", sql.DbPath) {
+		return err
+	}
+
+	err = Start(sql.DbPath, pool.AvailableBandwidth)
+	core.IsErr(err, "cannot start application: %v")
 	return err
 }
 
@@ -279,6 +305,16 @@ func LibraryList(poolName string, folder string) (library.List, error) {
 	return ls, err
 }
 
+func LibraryFind(poolName string, id uint64) (library.File, error) {
+	p, err := PoolGet(poolName)
+	if core.IsErr(err, "cannot get pool '%s' for chat app", poolName) {
+		return library.File{}, err
+	}
+
+	l := library.Get(p, "library")
+	return l.Find(id)
+}
+
 func LibraryReceive(poolName string, id uint64, localPath string) error {
 	p, err := PoolGet(poolName)
 	if core.IsErr(err, "cannot get pool '%s' for chat app", poolName) {
@@ -301,14 +337,14 @@ func LibrarySave(poolName string, id uint64, dest string) error {
 	return err
 }
 
-func LibrarySend(poolName string, localPath string, name string, solveConflicts bool, tags ...string) error {
+func LibrarySend(poolName string, localPath string, name string, solveConflicts bool, tags ...string) (library.File, error) {
 	p, err := PoolGet(poolName)
 	if core.IsErr(err, "cannot get pool '%s' for library app", poolName) {
-		return err
+		return library.File{}, err
 	}
 	l := library.Get(p, "library")
-	_, err = l.Send(localPath, name, solveConflicts, tags...)
-	return err
+	f, err := l.Send(localPath, name, solveConflicts, tags...)
+	return f, err
 }
 
 func InviteReceive(poolName string, after int64, onlyMine bool) ([]invite.Invite, error) {

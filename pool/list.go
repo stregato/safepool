@@ -17,21 +17,21 @@ import (
 // 	return hs, err
 // }
 
-func (p *Pool) readHead(e transport.Exchanger, name string) (Feed, error) {
+func (p *Pool) readHead(e transport.Exchanger, name string) (Head, error) {
 	var b bytes.Buffer
 	_, err := p.readFile(e, name, nil, &b)
 	if core.IsErr(err, "cannot read header of %s in %s: %v", name, e) {
-		return Feed{}, err
+		return Head{}, err
 	}
 
-	var h Feed
+	var h Head
 	err = json.Unmarshal(b.Bytes(), &h)
 	if core.IsErr(err, "corrupted header for file %s", name) {
-		return Feed{}, err
+		return Head{}, err
 	}
 
 	if !security.Verify(h.AuthorId, h.Hash, h.Signature) {
-		return Feed{}, ErrNoExchange
+		return Head{}, ErrNoExchange
 	}
 
 	return h, err

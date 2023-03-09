@@ -18,21 +18,21 @@ import (
 	"github.com/godruoyi/go-snowflake"
 )
 
-func (p *Pool) Send(name string, r io.ReadSeekCloser, size int64, meta []byte) (Feed, error) {
+func (p *Pool) Send(name string, r io.ReadSeekCloser, size int64, meta []byte) (Head, error) {
 	id := snowflake.ID()
 	slot := core.Now().Format(FeedDateFormat)
 	n := path.Join(p.Name, FeedsFolder, slot, fmt.Sprintf("%d.body", id))
 	h, err := p.writeFile(p.e, n, r, size)
 	if core.IsErr(err, "cannot post file %s to %s: %v", name, p.e) {
-		return Feed{}, err
+		return Head{}, err
 	}
 
 	hash := h.Sum(nil)
 	signature, err := security.Sign(p.Self, hash)
 	if core.IsErr(err, "cannot sign file %s.body in %s: %v", name, p.e) {
-		return Feed{}, err
+		return Head{}, err
 	}
-	f := Feed{
+	f := Head{
 		Id:        id,
 		Name:      name,
 		Size:      size,
@@ -46,7 +46,7 @@ func (p *Pool) Send(name string, r io.ReadSeekCloser, size int64, meta []byte) (
 	}
 	data, err := json.Marshal(f)
 	if core.IsErr(err, "cannot marshal header to json: %v") {
-		return Feed{}, err
+		return Head{}, err
 	}
 
 	hr := core.NewBytesReader(data)
@@ -54,12 +54,12 @@ func (p *Pool) Send(name string, r io.ReadSeekCloser, size int64, meta []byte) (
 	_, err = p.writeFile(p.e, hn, hr, int64(len(data)))
 	if core.IsErr(err, "cannot write header %s.head in %s: %v", name, p.e) {
 		p.e.Delete(n)
-		return Feed{}, err
+		return Head{}, err
 	}
 
 	_, err = p.e.SetCheckpoint(path.Join(p.Name, FeedsFolder, ".touch"))
 	if core.IsErr(err, "cannot set checkpoint in %s: %v", p.e) {
-		return Feed{}, err
+		return Head{}, err
 	}
 
 	core.Info("file '%s' sent to exchange '%s': id '%d', size '%d', hash '%s'", name, p.e, id,

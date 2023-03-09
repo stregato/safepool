@@ -33,7 +33,7 @@ func (p *Pool) getSlots(last string) ([]string, error) {
 	return slots, nil
 }
 
-func (p *Pool) Sync() ([]Feed, error) {
+func (p *Pool) Sync() ([]Head, error) {
 	if core.Since(p.lastAccessSync) >= SyncAccessFrequency {
 		p.syncAccess()
 		p.lastAccessSync = core.Now()
@@ -51,7 +51,7 @@ func (p *Pool) Sync() ([]Feed, error) {
 	}
 	hs, _ := p.List(0)
 
-	feeds := map[uint64]Feed{}
+	feeds := map[uint64]Head{}
 	for _, h := range hs {
 		feeds[h.Id] = h
 	}

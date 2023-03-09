@@ -24,7 +24,7 @@ type Message struct {
 	Time        time.Time `json:"time"`
 	ContentType string    `json:"contentType"`
 	Text        string    `json:"text"`
-	Binary      []byte    `json:"bytes"`
+	Binary      []byte    `json:"binary"`
 	Preview     []byte    `json:"preview"`
 	Signature   []byte    `json:"signature"`
 }
@@ -81,7 +81,7 @@ func (c *Chat) SendMessage(contentType string, text string, binary []byte) (uint
 	return m.Id, nil
 }
 
-func (c *Chat) accept(h pool.Feed) {
+func (c *Chat) accept(h pool.Head) {
 	name := h.Name
 	if !strings.HasPrefix(name, c.Name) || !strings.HasSuffix(name, ".chat") || h.Size > 10*1024*1024 {
 		return
@@ -100,6 +100,8 @@ func (c *Chat) accept(h pool.Feed) {
 
 	var m Message
 	err = json.Unmarshal(buf.Bytes(), &m)
+	fmt.Print(buf.String())
+
 	if core.IsErr(err, "invalid chat message %s: %v", h.Name) {
 		return
 	}

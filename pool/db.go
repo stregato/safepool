@@ -8,16 +8,16 @@ import (
 	"github.com/code-to-go/safepool/sql"
 )
 
-func sqlGetFeeds(pool string, ctime int64) ([]Feed, error) {
+func sqlGetFeeds(pool string, ctime int64) ([]Head, error) {
 	rows, err := sql.Query("GET_FEEDS", sql.Args{"pool": pool, "ctime": ctime})
 	if core.IsErr(err, "cannot get pools feeds from db: %v") {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var feeds []Feed
+	var feeds []Head
 	for rows.Next() {
-		var f Feed
+		var f Head
 		var modTime int64
 		var hash string
 		var meta string
@@ -32,15 +32,15 @@ func sqlGetFeeds(pool string, ctime int64) ([]Feed, error) {
 	return feeds, nil
 }
 
-func sqlGetFeed(pool string, id uint64) (Feed, error) {
-	var f Feed
+func sqlGetFeed(pool string, id uint64) (Head, error) {
+	var f Head
 	var modTime int64
 	var hash string
 	var meta string
 	err := sql.QueryRow("GET_FEED", sql.Args{"pool": pool, "id": id},
 		&f.Id, &f.Name, &modTime, &f.Size, &f.AuthorId, &hash, &meta, &f.Slot, &f.CTime)
 	if core.IsErr(err, "cannot get feed with id '%d' in pool '%s': %v", id, pool) {
-		return Feed{}, err
+		return Head{}, err
 	}
 
 	f.Hash = sql.DecodeBase64(hash)
@@ -54,7 +54,7 @@ func sqlDelFeedBefore(pool string, id int64) error {
 	return err
 }
 
-func sqlAddFeed(pool string, f Feed) error {
+func sqlAddFeed(pool string, f Head) error {
 	_, err := sql.Exec("SET_FEED", sql.Args{
 		"pool":     pool,
 		"id":       f.Id,

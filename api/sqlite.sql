@@ -239,7 +239,7 @@ SELECT name,authorId,modTime,id,size,contentType,hash,hashChain,ctime FROM libra
     WHERE pool=:pool AND base=:base AND name=:name AND authorId=:authorId
 
 -- GET_LIBRARY_FILES_SUBFOLDERS
-SELECT folder FROM library_files WHERE pool=:pool AND base=:base AND folder LIKE :folder AND level=:level ORDER BY folder
+SELECT DISTINCT folder FROM library_files WHERE pool=:pool AND base=:base AND folder LIKE :folder AND level=:level ORDER BY folder
 
 -- GET_LIBRARY_FILES_HASHES
 SELECT hash FROM library_files WHERE pool=:pool AND base=:base AND name=:name ORDER BY modTime DESC LIMIT :limit

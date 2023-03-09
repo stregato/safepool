@@ -2,18 +2,18 @@ package pool
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/code-to-go/safepool/core"
 )
 
 func (p *Pool) Sub(sub string, ids []string, apps []string) (Config, error) {
-	var name string
-	parts := strings.Split(p.Name, "/")
-	if len(parts) > 2 && parts[len(parts)-2] == "@" {
-		name = fmt.Sprintf("%s/%s", strings.Join(parts[0:len(parts)-2], "/"), sub)
+	parent, name := path.Split(p.Name)
+	if strings.HasPrefix(name, "#") {
+		name = path.Join(parent, fmt.Sprintf("#%s", sub))
 	} else {
-		name = fmt.Sprintf("%s/@/%s", p.Name, sub)
+		name = path.Join(p.Name, fmt.Sprintf("#%s", sub))
 	}
 
 	c := Config{

@@ -91,6 +91,8 @@ func CloseDB() error {
 	}
 	err := db.Close()
 	db = nil
+	queriesCache = map[string]string{}
+	stmtCache = map[string]*sql.Stmt{}
 	return err
 }
 

@@ -32,7 +32,7 @@ var ErrInvalidName = errors.New("provided pool has invalid name")
 
 type Consumer interface {
 	TimeOffset(s *Pool) time.Time
-	Accept(s *Pool, h Feed) bool
+	Accept(s *Pool, h Head) bool
 }
 
 type Pool struct {
@@ -55,17 +55,17 @@ type Pool struct {
 	mutex            sync.Mutex
 }
 
-type Feed struct {
-	Id        uint64
-	Name      string
-	Size      int64
-	Hash      []byte
-	ModTime   time.Time
-	AuthorId  string
-	Signature []byte
-	Meta      []byte
-	CTime     int64  `json:"-"`
-	Slot      string `json:"-"`
+type Head struct {
+	Id        uint64    `json:"id"`
+	Name      string    `json:"name"`
+	Size      int64     `json:"size"`
+	Hash      []byte    `json:"hash"`
+	ModTime   time.Time `json:"modTime"`
+	AuthorId  string    `json:"authorId"`
+	Signature []byte    `json:"signature"`
+	Meta      []byte    `json:"meta"`
+	CTime     int64     `json:"-"`
+	Slot      string    `json:"-"`
 }
 
 const (
@@ -89,11 +89,11 @@ func List() []string {
 	return names
 }
 
-type AcceptFunc func(feed Feed)
+type AcceptFunc func(feed Head)
 
 const All = ""
 
-func (p *Pool) List(ctime int64) ([]Feed, error) {
+func (p *Pool) List(ctime int64) ([]Head, error) {
 	hs, err := sqlGetFeeds(p.Name, ctime)
 	if core.IsErr(err, "cannot read Pool feeds: %v") {
 		return nil, err

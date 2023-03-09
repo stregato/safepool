@@ -22,6 +22,7 @@ import (
 	"github.com/code-to-go/safepool/api"
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/pool"
+	"github.com/code-to-go/safepool/security"
 	"github.com/sirupsen/logrus"
 	"github.com/skratchdot/open-golang/open"
 )
@@ -52,7 +53,7 @@ func cInput(err error, i *C.char, v any) error {
 }
 
 //export start
-func start(dbPath *C.char, availableBandwith *C.char) C.Result {
+func start(dbPath *C.char, cachePath *C.char, availableBandwith *C.char) C.Result {
 	var ab pool.Bandwidth
 	p := C.GoString(dbPath)
 	switch C.GoString(availableBandwith) {
@@ -65,23 +66,36 @@ func start(dbPath *C.char, availableBandwith *C.char) C.Result {
 	default:
 		cResult(nil, fmt.Errorf("invalid bandwidth option %s. Valid options are low, medium, high", C.GoString(availableBandwith)))
 	}
-
+	pool.CachePath = C.GoString(cachePath)
 	return cResult(nil, api.Start(p, ab))
 }
 
 //export stop
 func stop() C.Result {
-	return cResult(nil, nil)
+	err := api.Stop()
+	return cResult(nil, err)
 }
 
-//export getSelfId
-func getSelfId() C.Result {
+//export factoryReset
+func factoryReset() C.Result {
+	err := api.FactoryReset()
+	return cResult(nil, err)
+}
+
+//export securitySelfId
+func securitySelfId() C.Result {
 	return cResult(api.Self.Id(), nil)
 }
 
-//export getSelf
-func getSelf() C.Result {
+//export securitySelf
+func securitySelf() C.Result {
 	return cResult(api.Self, nil)
+}
+
+//export securityIdentityFromId
+func securityIdentityFromId(id *C.char) C.Result {
+	identity, err := security.IdentityFromId(C.GoString(id))
+	return cResult(identity, err)
 }
 
 //export poolList
@@ -200,6 +214,13 @@ func libraryList(poolName *C.char, folder *C.char) C.Result {
 	return cResult(ls, nil)
 }
 
+//export libraryFind
+func libraryFind(poolName *C.char, id C.long) C.Result {
+	p := C.GoString(poolName)
+	f, err := api.LibraryFind(p, uint64(id))
+	return cResult(f, err)
+}
+
 //export libraryReceive
 func libraryReceive(poolName *C.char, id C.long, localPath *C.char) C.Result {
 	p, l := C.GoString(poolName), C.GoString(localPath)
@@ -223,11 +244,11 @@ func librarySend(poolName *C.char, localPath *C.char, name *C.char, solveConflic
 		return cResult(nil, err)
 	}
 
-	err = api.LibrarySend(p, l, n, solveConflicts == 0, tags...)
+	f, err := api.LibrarySend(p, l, n, solveConflicts == 0, tags...)
 	if core.IsErr(err, "cannot add document '%s' in pool '%s': %v", p, n) {
 		return cResult(nil, err)
 	}
-	return cResult(nil, nil)
+	return cResult(f, nil)
 }
 
 //export inviteReceive

@@ -255,50 +255,62 @@ func (l *Library) Save(id uint64, dest string) error {
 	return nil
 }
 
-func (l *Library) Receive(id uint64, localPath string) (pool.Feed, error) {
-	os.MkdirAll(filepath.Dir(localPath), 0755)
-
-	f, err := os.Create(localPath + ".tmp")
-	if core.IsErr(err, "cannot create '%s': %v", localPath) {
-		return pool.Feed{}, err
-	}
-
-	d, ok, err := sqlGetDocumentById(l.Pool.Name, l.Name, id)
+func (l *Library) Find(id uint64) (File, error) {
+	l.Pool.Sync()
+	f, ok, err := sqlGetFileById(l.Pool.Name, l.Name, id)
 	if core.IsErr(err, "cannot get document with id '%d': %v", id) {
-		return pool.Feed{}, err
+		return File{}, err
 	}
 	if !ok {
-		return pool.Feed{}, core.ErrInvalidId
+		return File{}, core.ErrInvalidId
+	}
+	return f, nil
+}
+
+func (l *Library) Receive(id uint64, localPath string) (File, error) {
+	os.MkdirAll(filepath.Dir(localPath), 0755)
+
+	lf, err := os.Create(localPath + ".tmp")
+	if core.IsErr(err, "cannot create '%s': %v", localPath) {
+		return File{}, err
 	}
 
-	err = l.Pool.Receive(id, nil, f)
-	f.Close()
+	f, ok, err := sqlGetFileById(l.Pool.Name, l.Name, id)
+	if core.IsErr(err, "cannot get document with id '%d': %v", id) {
+		return File{}, err
+	}
+	if !ok {
+		return File{}, core.ErrInvalidId
+	}
+
+	err = l.Pool.Receive(id, nil, lf)
+	lf.Close()
 	if core.IsErr(err, "cannot get file with id %d: %v", id) {
 		os.Remove(localPath + ".tmp")
-		return pool.Feed{}, err
+		return File{}, err
 	}
 	err = os.Rename(localPath+".tmp", localPath)
 	if core.IsErr(err, "cannot overwrite old file %s: %v", localPath) {
-		return pool.Feed{}, err
+		return File{}, err
 	}
 
 	stat, _ := os.Stat(localPath)
 	lo := Local{
 		Id:        id,
-		Name:      d.Name,
+		Name:      f.Name,
 		Path:      localPath,
-		AuthorId:  d.AuthorId,
+		AuthorId:  f.AuthorId,
 		ModTime:   stat.ModTime(),
 		Size:      uint64(stat.Size()),
-		Hash:      d.Hash,
-		HashChain: d.HashChain,
+		Hash:      f.Hash,
+		HashChain: f.HashChain,
 	}
 
 	err = sqlSetLocal(l.Pool.Name, l.Name, lo)
 	if core.IsErr(err, "cannot update document for id %d: %v", id) {
-		return pool.Feed{}, err
+		return File{}, err
 	}
-	return pool.Feed{}, nil
+	return f, nil
 }
 
 func (l *Library) Delete(id uint64) error {
@@ -316,10 +328,10 @@ func (l *Library) GetLocalPath(name string) (string, bool) {
 
 // Send uploads the specified file localPath to the pool with the provided name. When solveConflicts is true
 // the
-func (l *Library) Send(localPath string, name string, solveConflicts bool, tags ...string) (pool.Feed, error) {
+func (l *Library) Send(localPath string, name string, solveConflicts bool, tags ...string) (File, error) {
 	mime, err := mimetype.DetectFile(localPath)
 	if core.IsErr(err, "cannot detect mime type of '%s': %v", localPath) {
-		return pool.Feed{}, err
+		return File{}, err
 	}
 
 	stat, _ := os.Stat(localPath)
@@ -327,12 +339,12 @@ func (l *Library) Send(localPath string, name string, solveConflicts bool, tags 
 	var hashChain [][]byte
 	lo, ok, err := sqlGetLocal(l.Pool.Name, l.Name, name)
 	if core.IsErr(err, "db error in reading document %s: %v", name) {
-		return pool.Feed{}, err
+		return File{}, err
 	}
 	if solveConflicts {
 		hashChain, err = sqlGetFilesHashes(l.Pool.Name, l.Name, name, HashChainMaxLength)
 		if core.IsErr(err, "cannot get hashes for file %s: %v", name) {
-			return pool.Feed{}, err
+			return File{}, err
 		}
 	} else if ok {
 		hashChain = append(lo.HashChain, lo.Hash)
@@ -347,16 +359,16 @@ func (l *Library) Send(localPath string, name string, solveConflicts bool, tags 
 		HashChain:   hashChain,
 	})
 	if core.IsErr(err, "cannot marshal metadata to json: %v") {
-		return pool.Feed{}, err
+		return File{}, err
 	}
 
 	f, err := os.Open(localPath)
 	if core.IsErr(err, "cannot open '%s': %v", localPath) {
-		return pool.Feed{}, err
+		return File{}, err
 	}
 	h, err := l.Pool.Send(path.Join(l.Name, name), f, stat.Size(), m)
 	if core.IsErr(err, "cannot post content to pool '%s': %v", l.Pool.Name) {
-		return pool.Feed{}, err
+		return File{}, err
 	}
 
 	l.Pool.Sync()
@@ -371,10 +383,19 @@ func (l *Library) Send(localPath string, name string, solveConflicts bool, tags 
 		HashChain: hashChain,
 	}
 	err = sqlSetLocal(l.Pool.Name, l.Name, lo)
-	return h, err
+	return File{
+		Name:        h.Name,
+		Id:          h.Id,
+		ModTime:     h.ModTime,
+		Size:        uint64(h.Size),
+		AuthorId:    h.AuthorId,
+		ContentType: mime.String(),
+		Hash:        h.Hash,
+		Tags:        tags,
+	}, err
 }
 
-func (l *Library) accept(feed pool.Feed) {
+func (l *Library) accept(feed pool.Head) {
 	if !strings.HasPrefix(feed.Name, l.Name+"/") {
 		return
 	}

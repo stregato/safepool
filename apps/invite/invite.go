@@ -74,7 +74,7 @@ func Receive(p *pool.Pool, after int64, onlyMine bool) ([]Invite, error) {
 	return sqlGetInvites(p.Name, after, onlyMine)
 }
 
-func accept(p *pool.Pool, f pool.Feed) {
+func accept(p *pool.Pool, f pool.Head) {
 	if !strings.HasPrefix(f.Name, "invite/") {
 		return
 	}
@@ -105,6 +105,7 @@ type Token struct {
 }
 
 func Decode(self security.Identity, token string) (Invite, error) {
+	token = strings.ReplaceAll(token, "_", "/")
 	parts := strings.Split(token, ":")
 	if len(parts) != 2 {
 		return Invite{}, ErrInvalidToken
@@ -205,8 +206,8 @@ func Encode(i Invite) (string, error) {
 		return "", err
 	}
 
-	return fmt.Sprintf("%s:%s",
+	return strings.ReplaceAll(fmt.Sprintf("%s:%s",
 		base64.StdEncoding.EncodeToString(tk),
-		base64.StdEncoding.EncodeToString(sig)), nil
+		base64.StdEncoding.EncodeToString(sig)), "/", "_"), nil
 
 }
