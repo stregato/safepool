@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/code-to-go/safepool/api"
+	"github.com/code-to-go/safepool/apps/chat"
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/pool"
 	"github.com/code-to-go/safepool/security"
@@ -183,25 +184,43 @@ func poolParseInvite(token *C.char) C.Result {
 }
 
 //export chatReceive
-func chatReceive(poolName *C.char, after, before C.long, limit C.int) C.Result {
+func chatReceive(poolName *C.char, after, before C.long, limit C.int, private *C.char) C.Result {
+	var private_ chat.Private
+	err := json.Unmarshal([]byte(C.GoString(private)), &private_)
+	if core.IsErr(err, "cannot unmarshal private: %v") {
+		return cResult(nil, err)
+	}
+
 	messages, err := api.ChatReceive(C.GoString(poolName), time.UnixMicro(int64(after)),
-		time.UnixMicro(int64(before)), int(limit))
+		time.UnixMicro(int64(before)), int(limit), private_)
 	return cResult(messages, err)
 }
 
 //export chatSend
-func chatSend(poolName *C.char, contentType *C.char, text *C.char, binary *C.char) C.Result {
+func chatSend(poolName *C.char, contentType *C.char, text *C.char, binary *C.char, private *C.char) C.Result {
 	bs, err := base64.StdEncoding.DecodeString(C.GoString(binary))
 	if core.IsErr(err, "invalid binary in message: %v") {
 		return cResult(nil, err)
 	}
 
+	var private_ chat.Private
+	err = json.Unmarshal([]byte(C.GoString(private)), &private_)
+	if core.IsErr(err, "cannot unmarshal private: %v") {
+		return cResult(nil, err)
+	}
+
 	id, err := api.ChatSend(C.GoString(poolName), C.GoString(contentType),
-		C.GoString(text), bs)
+		C.GoString(text), bs, private_)
 	if core.IsErr(err, "cannot post message: %v") {
 		return cResult(nil, err)
 	}
 	return cResult(id, nil)
+}
+
+//export chatPrivates
+func chatPrivates(poolName *C.char) C.Result {
+	privates, err := api.ChatPrivates(C.GoString(poolName))
+	return cResult(privates, err)
 }
 
 //export libraryList

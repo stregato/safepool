@@ -50,7 +50,7 @@ INSERT INTO configs(pool,k,s,i,b) VALUES(:pool,:key,:s,:i,:b)
 
 -- INIT
 CREATE TABLE IF NOT EXISTS feeds (
-    pool VARCHAR(128) NOT NULL, 
+    pool VARCHAR(256) NOT NULL, 
     id INTEGER NOT NULL,
     name VARCHAR(8192) NOT NULL, 
     modTime INTEGER NOT NULL,
@@ -89,7 +89,7 @@ DELETE FROM feeds WHERE pool=:pool
 
 -- INIT
 CREATE TABLE IF NOT EXISTS keys (
-    pool VARCHAR(128) NOT NULL, 
+    pool VARCHAR(256) NOT NULL, 
     keyId INTEGER, 
     keyValue VARCHAR(128),
     CONSTRAINT pk_safe_keyId PRIMARY KEY(pool,keyId)
@@ -111,7 +111,7 @@ DELETE FROM keys WHERE pool=:pool
 
 -- INIT
 CREATE TABLE IF NOT EXISTS pools (
-    name VARCHAR(512),
+    name VARCHAR(256),
     configs BLOB,
     PRIMARY KEY(name)
 );
@@ -132,7 +132,7 @@ DELETE FROM pools WHERE name=:name
 
 -- INIT
 CREATE TABLE IF NOT EXISTS checkpoints (
-    pool VARCHAR(512),
+    pool VARCHAR(256),
     tag VARCHAR(4096),
     slot VARCHAR(16),
     modTime INTEGER,
@@ -152,7 +152,7 @@ DELETE FROM checkpoints WHERE pool=:pool
 
 -- INIT
 CREATE TABLE IF NOT EXISTS accesses (
-    pool VARCHAR(128),
+    pool VARCHAR(256),
     id VARCHAR(256),
     state INTEGER,
     modTime INTEGER,
@@ -182,28 +182,36 @@ DELETE FROM accesses WHERE pool=:pool
 
 -- INIT
 CREATE TABLE IF NOT EXISTS chats (
-    pool VARCHAR(128),
+    pool VARCHAR(256),
+    chat VARCHAR(128),
     id INTEGER,
     author VARCHAR(128),
+    privateId VARCHAR(1024),
     time INTEGER,
     message BLOB,
-    CONSTRAINT pk_pool_id_author PRIMARY KEY(pool,id,author)
+    CONSTRAINT pk_pool_id_author PRIMARY KEY(pool,chat,id,author)
 );
 
+-- INIT
+CREATE INDEX IF NOT EXISTS idx_chats_private ON chats(privateId);
+
 -- SET_CHAT_MESSAGE
-INSERT INTO chats(pool,id,author,time,message) VALUES(:pool,:id,:author,:time,:message)
-    ON CONFLICT(pool,id,author) DO UPDATE SET message=:message,time=:time
-	    WHERE pool=:pool AND id=:id AND author=:author
+INSERT INTO chats(pool,chat,id,author,privateId,time,message) VALUES(:pool,:chat,:id,:author,:privateId,:time,:message)
+    ON CONFLICT(pool,chat,id,author) DO UPDATE SET message=:message,time=:time,privateId=:privateId
+	    WHERE pool=:pool AND chat=:chat AND id=:id AND author=:author
 
 -- GET_CHAT_MESSAGES
-SELECT message FROM chats WHERE pool=:pool AND time > :after AND time < :before ORDER BY time DESC LIMIT :limit
+SELECT message FROM chats WHERE pool=:pool AND chat=:chat AND time > :after AND time < :before AND privateId=:privateId ORDER BY time DESC LIMIT :limit
 
 -- DELETE_CHAT
-DELETE FROM chats WHERE pool=:pool 
+DELETE FROM chats WHERE pool=:pool AND chat=:chat
+
+-- GET_CHAT_PRIVATES
+SELECT DISTINCT privateId FROM chats WHERE pool=:pool AND chat=:chat
 
 -- INIT
 CREATE TABLE IF NOT EXISTS library_files (
-    pool VARCHAR(128) NOT NULL,
+    pool VARCHAR(256) NOT NULL,
     base VARCHAR(128) NOT NULL,
     id INTEGER NOT NULL,
     name VARCHAR(4096) NOT NULL,
@@ -246,7 +254,7 @@ SELECT hash FROM library_files WHERE pool=:pool AND base=:base AND name=:name OR
 
 -- INIT
 CREATE TABLE IF NOT EXISTS library_locals (
-    pool VARCHAR(128) NOT NULL,
+    pool VARCHAR(256) NOT NULL,
     base VARCHAR(128) NOT NULL,
     folder VARCHAR(4096) NOT NULL,
     name VARCHAR(4096) NOT NULL,
@@ -281,7 +289,7 @@ DELETE FROM library_files WHERE pool=:pool AND base=:base
 
 -- INIT
 CREATE TABLE IF NOT EXISTS invites (
-    pool VARCHAR(128) NOT NULL,
+    pool VARCHAR(256) NOT NULL,
     ctime INTEGER NOT NULL,
     valid INTEGER NOT NULL,
     content BLOB NOT NULL
@@ -302,7 +310,7 @@ SELECT content FROM invites WHERE pool=:pool AND ctime>:ctime AND valid
 
 -- INIT
 CREATE TABLE IF NOT EXISTS breakpoints (
-    pool VARCHAR(128) NOT NULL,
+    pool VARCHAR(256) NOT NULL,
     app VARCHAR(128) NOT NULL,
     ctime INTEGER NOT NULL,
     CONSTRAINT pk_breakpoints PRIMARY KEY(pool,app)

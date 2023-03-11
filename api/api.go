@@ -267,24 +267,42 @@ func PoolUsers(poolName string) ([]security.Identity, error) {
 	return p.Users()
 }
 
-func ChatReceive(poolName string, after, before time.Time, limit int) ([]chat.Message, error) {
+func getChatName(private chat.Private) string {
+	if private == nil {
+		return "chat"
+	} else {
+		return "private"
+	}
+}
+
+func ChatPrivates(poolName string) ([]chat.Private, error) {
 	p, err := PoolGet(poolName)
 	if core.IsErr(err, "cannot get pool '%s' for chat app", poolName) {
 		return nil, err
 	}
 
-	ch := chat.Get(p, "chat")
-	return ch.Receive(after, before, limit)
+	ch := chat.Get(p, "private")
+	return ch.Privates()
 }
 
-func ChatSend(poolName string, contentType string, text string, bytes []byte) (uint64, error) {
+func ChatReceive(poolName string, after, before time.Time, limit int, private chat.Private) ([]chat.Message, error) {
+	p, err := PoolGet(poolName)
+	if core.IsErr(err, "cannot get pool '%s' for chat app", poolName) {
+		return nil, err
+	}
+
+	ch := chat.Get(p, getChatName(private))
+	return ch.Receive(after, before, limit, private)
+}
+
+func ChatSend(poolName string, contentType string, text string, bytes []byte, private chat.Private) (uint64, error) {
 	p, err := PoolGet(poolName)
 	if core.IsErr(err, "cannot get pool '%s' for chat app", poolName) {
 		return 0, err
 	}
 
-	c := chat.Get(p, "chat")
-	id, err := c.SendMessage(contentType, text, bytes)
+	c := chat.Get(p, getChatName(private))
+	id, err := c.SendMessage(contentType, text, bytes, private)
 	if core.IsErr(err, "cannot post chat message: %v") {
 		return 0, err
 	}
