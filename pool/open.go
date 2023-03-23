@@ -1,9 +1,13 @@
 package pool
 
 import (
+	"database/sql"
+
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/security"
 )
+
+const defaultLifeSpanHours = 30 * 24
 
 // Init initialized a domain on the specified exchangers
 func Open(self security.Identity, name string) (*Pool, error) {
@@ -11,18 +15,42 @@ func Open(self security.Identity, name string) (*Pool, error) {
 	if core.IsErr(err, "unknown pool %s: %v", name) {
 		return nil, err
 	}
+
 	p := &Pool{
-		Name:             name,
-		Self:             self,
-		config:           config,
+		Name:          name,
+		Self:          self,
+		Apps:          config.Apps,
+		LifeSpanHours: config.LifeSpanHours,
+
 		lastAccessSync:   core.Now(),
 		lastHouseKeeping: core.Now(),
 	}
+	if config.LifeSpanHours < 1 {
+		config.LifeSpanHours = defaultLifeSpanHours
+	}
+
+	masterKeyId, masterKey, err := p.sqlGetMasterKey()
+	if err == nil {
+		p.masterKeyId = masterKeyId
+		p.masterKey = masterKey
+	}
+	if err != sql.ErrNoRows && core.IsErr(err, "missing master key in pool %s: %v", name) {
+		return nil, err
+	}
+
 	err = p.connectSafe(config)
 	if err != nil {
 		return nil, err
 	}
+	p.ExportSelf(false)
 
-	err = p.syncAccess()
-	return p, err
+	err = p.SyncAccess()
+	if core.IsErr(err, "cannot sync access: %v") {
+		return nil, err
+	}
+
+	if p.masterKeyId == 0 || p.masterKey == nil {
+		return nil, ErrNotAuthorized
+	}
+	return p, nil
 }

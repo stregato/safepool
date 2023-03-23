@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/code-to-go/safepool/core"
-	"github.com/code-to-go/safepool/transport"
+	"github.com/code-to-go/safepool/storage"
 
 	"github.com/sirupsen/logrus"
 )
 
-func pingExchanger(e transport.Exchanger, pool string, data []byte) (time.Duration, error) {
+func pingExchanger(e storage.Storage, pool string, data []byte) (time.Duration, error) {
 	start := core.Now()
 	name := path.Join(pool, fmt.Sprintf(pingName, start.UnixMilli()))
 	err := e.Write(name, core.NewBytesReader(data), int64(len(data)), nil)
@@ -44,7 +44,7 @@ func (p *Pool) createExchangers(config Config) {
 
 	urls := append(config.Public, config.Private...)
 	for _, url := range urls {
-		e, err := transport.NewExchanger(url)
+		e, err := storage.OpenStorage(url)
 		if core.IsErr(err, "cannot connect to exchange %s in Pool.createExchangers: %v", url) {
 			continue
 		}
@@ -53,6 +53,11 @@ func (p *Pool) createExchangers(config Config) {
 }
 
 func (p *Pool) findPrimary() {
+	if len(p.exchangers) == 1 {
+		p.e = p.exchangers[0]
+		return
+	}
+
 	min := time.Duration(math.MaxInt64)
 
 	data := make([]byte, 4192)

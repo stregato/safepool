@@ -13,24 +13,37 @@ var NtpServers = []string{
 
 var NtpRetries = 10
 var ClockOffset time.Duration
+var timeIsSync bool
+var timeTicker *time.Ticker
 
 func init() {
-	ticker := time.NewTicker(30 * time.Minute)
+	timeTicker = time.NewTicker(30 * time.Minute)
 	go func() {
-		for ; true; <-ticker.C {
-			for i := 0; i < NtpRetries; i++ {
-				for _, s := range NtpServers {
-					r, err := ntp.Query(s)
-					if err == nil {
-						ClockOffset = r.ClockOffset
-						Info("clock offset %v from %s ", ClockOffset, s)
-						goto done
-					}
-				}
-			}
-		done:
+		for ; true; <-timeTicker.C {
+			timeIsSync = syncTime()
 		}
 	}()
+}
+
+func syncTime() bool {
+	for i := 0; i < NtpRetries; i++ {
+		for _, s := range NtpServers {
+			r, err := ntp.Query(s)
+			if err == nil {
+				ClockOffset = r.ClockOffset
+				Info("clock offset %v from %s ", ClockOffset, s)
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TimeIsSync() bool {
+	if !timeIsSync {
+		timeIsSync = syncTime()
+	}
+	return timeIsSync
 }
 
 func Now() time.Time {

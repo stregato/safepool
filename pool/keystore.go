@@ -16,8 +16,7 @@ type Keystore map[uint64][]byte
 
 var cachedEncKeys = cache.New(time.Hour, 10*time.Hour)
 
-func (p *Pool) decodeKeystore(keystore []byte, nonce []byte) (Keystore, error) {
-	masterKey := p.keyFunc(p.masterKeyId)
+func (p *Pool) decodeKeystore(masterKey []byte, keystore []byte, nonce []byte) (Keystore, error) {
 	if masterKey == nil {
 		core.IsErr(ErrNotAuthorized, "No encryption key for id '%d': %v", p.masterKeyId)
 		return nil, ErrNotAuthorized

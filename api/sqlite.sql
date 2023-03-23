@@ -32,21 +32,24 @@ UPDATE identities SET alias=:alias WHERE id=:id
 
 -- INIT
 CREATE TABLE IF NOT EXISTS configs (
-    pool VARCHAR(128) NOT NULL, 
+    node VARCHAR(128) NOT NULL, 
     k VARCHAR(64) NOT NULL, 
     s VARCHAR(64) NOT NULL,
     i INTEGER NOT NULL,
     b TEXT,
-    CONSTRAINT pk_safe_key PRIMARY KEY(pool,k)
+    CONSTRAINT pk_safe_key PRIMARY KEY(node,k)
 );
 
 -- GET_CONFIG
-SELECT s, i, b FROM configs WHERE pool=:pool AND k=:key
+SELECT s, i, b FROM configs WHERE node=:node AND k=:key
 
 -- SET_CONFIG
-INSERT INTO configs(pool,k,s,i,b) VALUES(:pool,:key,:s,:i,:b)
-	ON CONFLICT(pool,k) DO UPDATE SET s=:s,i=:i,b=:b
-	WHERE pool=:pool AND k=:key
+INSERT INTO configs(node,k,s,i,b) VALUES(:node,:key,:s,:i,:b)
+	ON CONFLICT(node,k) DO UPDATE SET s=:s,i=:i,b=:b
+	WHERE node=:node AND k=:key
+
+-- DEL_CONFIG
+DELETE FROM configs WHERE node=:node
 
 -- INIT
 CREATE TABLE IF NOT EXISTS feeds (
@@ -92,6 +95,7 @@ CREATE TABLE IF NOT EXISTS keys (
     pool VARCHAR(256) NOT NULL, 
     keyId INTEGER, 
     keyValue VARCHAR(128),
+    master INTEGER,
     CONSTRAINT pk_safe_keyId PRIMARY KEY(pool,keyId)
 );
 
@@ -108,6 +112,15 @@ INSERT INTO keys(pool,keyId,keyValue) VALUES(:pool,:keyId,:keyValue)
 
 -- DELETE_KEYS
 DELETE FROM keys WHERE pool=:pool
+
+-- SET_MASTER_KEY
+UPDATE keys SET master = CASE keyId WHEN :keyId THEN 1 ELSE 0 END WHERE pool=:pool AND keyId=:keyId OR keyId=:oldKeyId
+
+-- GET_MASTER_KEY
+SELECT keyId, keyValue FROM keys WHERE pool=:pool AND master
+
+-- INIT
+CREATE INDEX IF NOT EXISTS idx_keys_master ON keys(master);
 
 -- INIT
 CREATE TABLE IF NOT EXISTS pools (
@@ -129,26 +142,6 @@ INSERT INTO pools(name,configs) VALUES(:name,:configs)
 
 -- DELETE_POOL
 DELETE FROM pools WHERE name=:name
-
--- INIT
-CREATE TABLE IF NOT EXISTS checkpoints (
-    pool VARCHAR(256),
-    tag VARCHAR(4096),
-    slot VARCHAR(16),
-    modTime INTEGER,
-    CONSTRAINT pk_checkpoints PRIMARY KEY(pool,tag)
-);
-
--- SET_CHECKPOINT
-INSERT INTO checkpoints(pool,tag,slot,modTime) VALUES(:pool,:tag,:slot,:modTime)
-    ON CONFLICT(pool,tag) DO UPDATE SET slot=:slot,modTime=:modTime
-	    WHERE pool=:pool AND tag=:tag
-
--- GET_CHECKPOINT
-SELECT slot,modTime FROM checkpoints WHERE pool=:pool AND tag=:tag
-
--- DELETE_CHECKPOINT
-DELETE FROM checkpoints WHERE pool=:pool 
 
 -- INIT
 CREATE TABLE IF NOT EXISTS accesses (

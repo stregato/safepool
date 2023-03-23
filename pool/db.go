@@ -92,6 +92,23 @@ func (p *Pool) sqlSetKey(keyId uint64, value []byte) error {
 	return err
 }
 
+func (p *Pool) sqlGetMasterKey() (keyId uint64, keyValue []byte, err error) {
+	var value string
+	err = sql.QueryRow("GET_MASTER_KEY", sql.Args{"pool": p.Name}, &keyId, &value)
+	if core.IsErr(err, "cannot read master key: %v") {
+		return 0, nil, err
+	}
+
+	keyValue = sql.DecodeBase64(value)
+	return keyId, keyValue, nil
+}
+
+func (p *Pool) sqlSetMasterKey(keyId, oldKeyId uint64) error {
+	_, err := sql.Exec("SET_MASTER_KEY", sql.Args{"pool": p.Name, "keyId": keyId, "oldKeyId": oldKeyId})
+	core.IsErr(err, "cannot set master key: %v")
+	return err
+}
+
 func (p *Pool) sqlGetKeystore() (Keystore, error) {
 	rows, err := sql.Query("GET_KEYS", sql.Args{"pool": p.Name})
 	if core.IsErr(err, "cannot read keystore for pool %s: %v", p.Name) {
@@ -143,9 +160,9 @@ func (p *Pool) sqlGetAccesses(onlyTrusted bool) (identities []security.Identity,
 		identities = append(identities, i)
 
 		accesses = append(accesses, Access{
-			Id:      id,
-			ModTime: sql.DecodeTime(modTime),
-			State:   state,
+			UserId: id,
+			Since:  sql.DecodeTime(modTime),
+			State:  state,
 		})
 	}
 	return identities, accesses, nil
@@ -153,9 +170,9 @@ func (p *Pool) sqlGetAccesses(onlyTrusted bool) (identities []security.Identity,
 
 func (p *Pool) sqlSetAccess(a Access) error {
 	_, err := sql.Exec("SET_ACCESS", sql.Args{
-		"id":      a.Id,
+		"id":      a.UserId,
 		"pool":    p.Name,
-		"modTime": sql.EncodeTime(a.ModTime),
+		"modTime": sql.EncodeTime(a.Since),
 		"state":   a.State,
 		"ts":      sql.EncodeTime(core.Now()),
 	})
@@ -187,20 +204,6 @@ func sqlGetPool(name string) (Config, error) {
 	return c, err
 }
 
-func sqlSetCheckpoint(pool, tag, slot string, modTime int64) error {
-	_, err := sql.Exec("SET_CHECKPOINT", sql.Args{"pool": pool, "tag": tag, "slot": slot, "modTime": modTime})
-	core.IsErr(err, "cannot save slot %s: %v", slot)
-	return err
-}
-
-func sqlGetCheckpoint(pool, tag string) (slot string, modTime int64, err error) {
-	err = sql.QueryRow("GET_CHECKPOINT", sql.Args{"pool": pool, "tag": tag}, &slot, &modTime)
-	if err != sql.ErrNoRows && core.IsErr(err, "cannot get slot: %v") {
-		return "", 0, err
-	}
-	return slot, modTime, nil
-}
-
 func sqlListPool() ([]string, error) {
 	var names []string
 	rows, err := sql.Query("LIST_POOL", nil)
@@ -226,9 +229,6 @@ func sqlReset(pool string) error {
 	}
 	if err == nil {
 		_, err = sql.Exec("DELETE_POOL", sql.Args{"name": pool})
-	}
-	if err == nil {
-		_, err = sql.Exec("DELETE_CHECKPOINT", sql.Args{"pool": pool})
 	}
 	if err == nil {
 		_, err = sql.Exec("DELETE_ACCESSES", sql.Args{"pool": pool})

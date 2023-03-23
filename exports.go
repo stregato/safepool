@@ -88,9 +88,20 @@ func securitySelfId() C.Result {
 	return cResult(api.Self.Id(), nil)
 }
 
-//export securitySelf
-func securitySelf() C.Result {
+//export securityGetSelf
+func securityGetSelf() C.Result {
 	return cResult(api.Self, nil)
+}
+
+//export securitySetSelf
+func securitySetSelf(identity *C.char) C.Result {
+	var i security.Identity
+	data := []byte(C.GoString(identity))
+	err := json.Unmarshal(data, &i)
+	if core.IsErr(err, "cannot unmarshal json from C: %v") {
+		return cResult(nil, err)
+	}
+	return cResult(nil, api.SetSelf(i))
 }
 
 //export securityIdentityFromId

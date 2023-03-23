@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/code-to-go/safepool/core"
+	"github.com/code-to-go/safepool/sql"
 )
 
 func (p *Pool) Dump() map[string]any {
@@ -18,7 +19,6 @@ func (p *Pool) Dump() map[string]any {
 		exchangers = append(exchangers, e.String())
 	}
 	m["exchangers"] = exchangers
-	m["accessHash"] = p.accessHash
 	m["lastAccessSync"] = p.lastAccessSync
 	m["lastAccessSyncElapsed"] = core.Since(p.lastAccessSync)
 	m["lastHouseKeeping"] = p.lastHouseKeeping
@@ -31,10 +31,13 @@ func (p *Pool) Dump() map[string]any {
 	}
 	m["keys"] = keys
 
-	tag := fmt.Sprintf("feeds@%s", p.e.String())
-	lastSlot, modTime, _ := sqlGetCheckpoint(p.Name, tag)
+	configNode := fmt.Sprintf("pool/%s", p.Name)
+	checkpointKey := fmt.Sprintf("checkpoints/%s", p.e.String())
+	slotKey := fmt.Sprintf("slots/%s", p.e.String())
+	lastSlot, _, _, _ := sql.GetConfig(configNode, slotKey)
 	m["lastSlot"] = lastSlot
-	m["checkpointModTime"] = modTime
+	_, lastCheckpoint, _, _ := sql.GetConfig(configNode, checkpointKey)
+	m["checkpointModTime"] = lastCheckpoint
 
 	feeds, _ := p.List(0)
 	m["feeds"] = feeds

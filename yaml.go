@@ -6,7 +6,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//func ReadYaml(s transport.Exchanger, name string, out interface{}) error {
+//func ReadYaml(s storage.Exchanger, name string, out interface{}) error {
 //	data, err := Read(s, name)
 //	if err != nil {
 //		return err
@@ -14,7 +14,7 @@ import (
 //	return yaml.Unmarshal(data, out)
 //}
 //
-//func WriteYaml(s transport.Exchanger, name string, in interface{}) error {
+//func WriteYaml(s storage.Exchanger, name string, in interface{}) error {
 //	d, err := yaml.Marshal(in)
 //	if err != nil {
 //		return err

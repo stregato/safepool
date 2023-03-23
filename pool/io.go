@@ -7,14 +7,12 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"os"
 	"path"
 	"strings"
-	"time"
 
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/security"
-	"github.com/code-to-go/safepool/transport"
+	"github.com/code-to-go/safepool/storage"
 	"github.com/godruoyi/go-snowflake"
 )
 
@@ -57,8 +55,9 @@ func (p *Pool) Send(name string, r io.ReadSeekCloser, size int64, meta []byte) (
 		return Head{}, err
 	}
 
-	_, err = p.e.SetCheckpoint(path.Join(p.Name, FeedsFolder, ".touch"))
-	if core.IsErr(err, "cannot set checkpoint in %s: %v", p.e) {
+	tn := path.Join(p.Name, FeedsFolder, ".touch")
+	err = storage.WriteFile(p.e, tn, nil)
+	if core.IsErr(err, "cannot set touch file %s in %s: %v", n, p.e) {
 		return Head{}, err
 	}
 
@@ -85,7 +84,8 @@ func (p *Pool) Send(name string, r io.ReadSeekCloser, size int64, meta []byte) (
 			if core.IsErr(err, "cannot send %s to secondary exchange %e: %v", hn, e) {
 				continue
 			}
-			_, err := e.SetCheckpoint(path.Join(p.Name, FeedsFolder, ".touch"))
+			tn := path.Join(p.Name, FeedsFolder, ".touch")
+			err = storage.WriteFile(e, tn, nil)
 			core.IsErr(err, "cannot set checkpoint in %s: %v", p.e)
 			core.Info("file '%s' sent to exchange '%s': id '%d', size '%d', hash '%s'", name, e, id,
 				size, base64.StdEncoding.EncodeToString(hash))
@@ -98,7 +98,7 @@ func (p *Pool) Send(name string, r io.ReadSeekCloser, size int64, meta []byte) (
 	return f, nil
 }
 
-func (p *Pool) Receive(id uint64, rang *transport.Range, w io.Writer) error {
+func (p *Pool) Receive(id uint64, rang *storage.Range, w io.Writer) error {
 	f, err := sqlGetFeed(p.Name, id)
 	if core.IsErr(err, "cannot retrieve %d from pool %v: %v", id, p) {
 		return err
@@ -129,7 +129,7 @@ func (p *Pool) Receive(id uint64, rang *transport.Range, w io.Writer) error {
 	return nil
 }
 
-func (p *Pool) writeFile(e transport.Exchanger, name string, r io.ReadSeekCloser, size int64) (hash.Hash, error) {
+func (p *Pool) writeFile(e storage.Storage, name string, r io.ReadSeekCloser, size int64) (hash.Hash, error) {
 	hr, err := security.NewHashReader(r)
 	if core.IsErr(err, "cannot create hash reader: %v") {
 		return nil, err
@@ -144,7 +144,7 @@ func (p *Pool) writeFile(e transport.Exchanger, name string, r io.ReadSeekCloser
 	return hr.Hash, err
 }
 
-func (p *Pool) readFile(e transport.Exchanger, name string, rang *transport.Range, w io.Writer) (hash.Hash, error) {
+func (p *Pool) readFile(e storage.Storage, name string, rang *storage.Range, w io.Writer) (hash.Hash, error) {
 	hw, err := security.NewHashWriter(w)
 	if core.IsErr(err, "cannot create hash stream: %v") {
 		return nil, err
@@ -158,77 +158,37 @@ func (p *Pool) readFile(e transport.Exchanger, name string, rang *transport.Rang
 	return hw.Hash, err
 }
 
-func (p *Pool) readAccessFile(e transport.Exchanger, name string) (AccessFile, hash.Hash, error) {
-	var a AccessFile
-	var sh security.SignedHash
-	signatureFile := path.Join(p.Name, fmt.Sprintf("%s.sign", name))
-	accessFile := path.Join(p.Name, name)
-
-	err := transport.ReadJSON(e, signatureFile, &sh, nil)
-	if os.IsNotExist(err) || core.IsErr(err, "cannot read signature file '%s': %v", signatureFile, err) {
-		return AccessFile{}, nil, err
+func (p *Pool) readAccessFile(e storage.Storage, name string) (id string, accessFile AccessFile, err error) {
+	name = path.Join(p.Name, accessFolder, name)
+	data, err := storage.ReadFile(e, name)
+	if core.IsErr(err, "cannot read access file: %s", err) {
+		return "", AccessFile{}, err
 	}
 
-	h := security.NewHash()
-	err = transport.ReadJSON(e, accessFile, &a, h)
-	if os.IsNotExist(err) || core.IsErr(err, "cannot read access file: %s", err) {
-		return AccessFile{}, nil, err
+	id, err = security.Unmarshal(data, &accessFile, security.SignatureField)
+	if core.IsErr(err, "invalid access file %s: %v", name) {
+		return "", AccessFile{}, err
 	}
 
-	trusted, err := security.Trusted()
-	if core.IsErr(err, "cannot get trusted identities: %v") {
-		return AccessFile{}, nil, nil
-	}
-
-	if security.VerifySignedHash(sh, []security.Identity{p.Self}, h.Sum(nil)) {
-		p.Trusted = true
-		return a, h, nil
-	}
-
-	if security.VerifySignedHash(sh, trusted, h.Sum(nil)) {
-		_ = security.AppendToSignedHash(sh, p.Self)
-		if !core.IsErr(err, "cannot lock access on %s: %v", p.Name, err) {
-			if security.AppendToSignedHash(sh, p.Self) == nil {
-				err = transport.WriteJSON(e, signatureFile, sh, nil)
-				core.IsErr(err, "cannot write signature file on %s: %v", p.Name, err)
-			}
-		}
-		p.Trusted = true
-	}
-
-	return a, h, nil
+	return id, accessFile, nil
 }
 
-func (p *Pool) writeAccessFile(e transport.Exchanger, a AccessFile) (hash.Hash, error) {
-	lockFile := path.Join(p.Name, ".access.lock")
-	signatureFile := path.Join(p.Name, ".access.sign")
-	accessFile := path.Join(p.Name, ".access")
+func (p *Pool) writeAccessFile(e storage.Storage, a AccessFile, name string) error {
+	filePath := path.Join(p.Name, accessFolder, name)
 
-	lockId, err := transport.LockFile(e, lockFile, time.Minute)
-	if core.IsErr(err, "cannot lock access on %s: %v", p.Name, err) {
-		return nil, err
+	data, err := security.Marshal(p.Self, a, security.SignatureField)
+	if core.IsErr(err, "cannot marshal access file on %s: %v", p.Name, err) {
+		return err
 	}
-	defer transport.UnlockFile(e, lockFile, lockId)
-
-	h := security.NewHash()
-	err = transport.WriteJSON(e, accessFile, a, h)
+	err = storage.WriteFile(e, filePath, data)
 	if core.IsErr(err, "cannot write access file on %s: %v", p.Name, err) {
-		return nil, err
+		return err
 	}
 
-	sh, err := security.NewSignedHash(h.Sum(nil), p.Self)
-	if core.IsErr(err, "cannot generate signature hash on %s: %v", p.Name, err) {
-		return nil, err
-	}
-	err = transport.WriteJSON(e, signatureFile, sh, nil)
-	if core.IsErr(err, "cannot write signature file on %s: %v", p.Name, err) {
-		return nil, err
-	}
-
-	return h, nil
+	return nil
 }
 
-func (p *Pool) writeIdentity(e transport.Exchanger, name string, identity security.Identity) error {
+func (p *Pool) writeIdentity(e storage.Storage, name string, identity security.Identity) error {
 	data, err := json.Marshal(p.Self.Public())
 	if core.IsErr(err, "cannot marshal identity: %v") {
 		return err
@@ -246,7 +206,7 @@ func (p *Pool) writeIdentity(e transport.Exchanger, name string, identity securi
 	return err
 }
 
-func (p *Pool) readIdentity(e transport.Exchanger, name string) (security.Identity, error) {
+func (p *Pool) readIdentity(e storage.Storage, name string) (security.Identity, error) {
 	var identity security.Identity
 	var buf bytes.Buffer
 
@@ -273,16 +233,4 @@ func (p *Pool) readIdentity(e transport.Exchanger, name string) (security.Identi
 		return identity, security.ErrInvalidSignature
 	}
 	return identity, nil
-}
-
-func (p *Pool) lockAccessFile(e transport.Exchanger) (uint64, error) {
-	lockFile := path.Join(p.Name, ".access.lock")
-	lockId, err := transport.LockFile(e, lockFile, time.Minute)
-	core.IsErr(err, "cannot lock access on %s: %v", p.Name, err)
-	return lockId, err
-}
-
-func (p *Pool) unlockAccessFile(e transport.Exchanger, lockId uint64) {
-	lockFile := path.Join(p.Name, ".access.lock")
-	transport.UnlockFile(e, lockFile, lockId)
 }

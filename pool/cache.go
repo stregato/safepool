@@ -7,7 +7,7 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/code-to-go/safepool/core"
-	"github.com/code-to-go/safepool/transport"
+	"github.com/code-to-go/safepool/storage"
 )
 
 var CachePath string
@@ -31,7 +31,7 @@ func (p *Pool) getCachePath(name string) (string, error) {
 	}
 }
 
-func (p *Pool) getFromCache(name string, rang *transport.Range, w io.Writer) (bool, error) {
+func (p *Pool) getFromCache(name string, rang *storage.Range, w io.Writer) (bool, error) {
 	if CacheSizeMB == 0 {
 		return false, nil
 	}

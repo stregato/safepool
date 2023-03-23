@@ -8,7 +8,8 @@ import (
 
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/security"
-	"github.com/code-to-go/safepool/transport"
+	"github.com/code-to-go/safepool/sql"
+	"github.com/code-to-go/safepool/storage"
 )
 
 type Bandwidth int
@@ -29,30 +30,39 @@ var ErrInvalidToken = errors.New("provided token is invalid: missing name or con
 var ErrInvalidId = errors.New("provided id not a valid ed25519 public key")
 var ErrInvalidConfig = errors.New("provided config is invalid: missing name or configs")
 var ErrInvalidName = errors.New("provided pool has invalid name")
+var ErrNoSyncClock = errors.New("cannot sync with global time server")
 
 type Consumer interface {
 	TimeOffset(s *Pool) time.Time
 	Accept(s *Pool, h Head) bool
 }
 
-type Pool struct {
-	Name       string            `json:"name"`
-	Id         uint64            `json:"id"`
-	Self       security.Identity `json:"self"`
-	Apps       []string          `json:"apps"`
-	Trusted    bool              `json:"trusted"`
-	Connection string            `json:"connection"`
+type Config struct {
+	Name          string   `json:"name"`
+	Public        []string `json:"public"`
+	Private       []string `json:"private"`
+	Apps          []string `json:"apps"`
+	LifeSpanHours int      `json:"lifeSpan"`
+}
 
-	e                transport.Exchanger
-	exchangers       []transport.Exchanger
-	masterKeyId      uint64
-	masterKey        []byte
-	lastAccessSync   time.Time
-	lastHouseKeeping time.Time
-	accessHash       []byte
-	config           Config
-	ctime            int64
-	mutex            sync.Mutex
+type Pool struct {
+	Name          string            `json:"name"`
+	Id            uint64            `json:"id"`
+	Self          security.Identity `json:"self"`
+	Apps          []string          `json:"apps"`
+	LifeSpanHours int               `json:"lifeSpanHours"`
+	Trusted       bool              `json:"trusted"`
+	Connection    string            `json:"connection"`
+
+	e                  storage.Storage
+	exchangers         []storage.Storage
+	masterKeyId        uint64
+	masterKey          []byte
+	lastAccessSync     time.Time
+	lastReadAccessFile string
+	lastHouseKeeping   time.Time
+	ctime              int64
+	mutex              sync.Mutex
 }
 
 type Head struct {
@@ -77,12 +87,6 @@ var ForceCreation = false
 var HouseKeepingPeriod = 10 * time.Minute
 var CacheSizeMB = 16
 var FeedDateFormat = "20060102"
-
-type Config struct {
-	Name    string   `json:"name"`
-	Public  []string `json:"public"`
-	Private []string `json:"private"`
-}
 
 func List() []string {
 	names, _ := sqlListPool()
@@ -127,6 +131,7 @@ func (p *Pool) Leave() error {
 	if core.IsErr(err, "cannot reset pool %s: %v", p) {
 		return err
 	}
+	sql.DelConfigs(fmt.Sprintf("pool/%s", p.Name))
 	return nil
 }
 

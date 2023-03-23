@@ -33,6 +33,9 @@ type Identity struct {
 
 	SignatureKey  Key `json:"s"`
 	EncryptionKey Key `json:"e"`
+
+	Trusted []string `json:"t"`
+	Avatar  []byte   `json:"a"`
 }
 
 func NewIdentity(nick string) (Identity, error) {

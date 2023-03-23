@@ -33,6 +33,11 @@ func NewHash() hash.Hash {
 	return h
 }
 
+func QuickHash(data []byte) []byte {
+	h := NewHash()
+	return h.Sum(data)
+}
+
 func NewHashReader(r io.ReadSeekCloser) (*HashReader, error) {
 	b, err := blake2b.New256(nil)
 	if core.IsErr(err, "cannot create black hash: %v") {

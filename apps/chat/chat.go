@@ -54,6 +54,10 @@ func Get(p *pool.Pool, name string) Chat {
 }
 
 func getPrivateId(private Private) string {
+	if len(private) == 0 {
+		return ""
+	}
+
 	sort.Strings(private)
 
 	var filtered Private
@@ -108,8 +112,8 @@ func (c *Chat) SendMessage(contentType string, text string, binary []byte, priva
 }
 
 func (c *Chat) protect(data []byte, userIds []string) (meta []byte, data2 []byte, err error) {
-	if userIds == nil {
-		return meta, data, nil
+	if len(userIds) == 0 {
+		return nil, data, nil
 	}
 	if len(userIds) > 8 {
 		return nil, nil, fmt.Errorf("private chats in %s can have at most 8 members", c.Pool.Name)
@@ -224,7 +228,6 @@ func (c *Chat) accept(h pool.Head) {
 
 	var m Message
 	err = json.Unmarshal(data, &m)
-	fmt.Print(buf.String())
 
 	if core.IsErr(err, "invalid chat message %s: %v", h.Name) {
 		return

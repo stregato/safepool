@@ -8,14 +8,14 @@ import (
 	"time"
 
 	"github.com/code-to-go/safepool/core"
-	"github.com/code-to-go/safepool/transport"
+	"github.com/code-to-go/safepool/storage"
 	"github.com/godruoyi/go-snowflake"
 )
 
 // LifeSpan is the maximal time data should stay in the pool. It is default to 30 days.
 var LifeSpan = 30 * 24 * time.Hour
 
-func (p *Pool) getAllSlots(e transport.Exchanger) []string {
+func (p *Pool) getAllSlots(e storage.Storage) []string {
 	fs, err := e.ReadDir(path.Join(p.Name, FeedsFolder), 0)
 	if core.IsErr(err, "cannot read content in pool %s exchange %s", p.Name, e) {
 		return nil
@@ -71,7 +71,7 @@ func (p *Pool) HouseKeeping() {
 }
 
 func (p *Pool) BaseId() uint64 {
-	thresold := (core.Since(core.SnowFlakeStart) - LifeSpan) / time.Millisecond
+	thresold := (core.Since(core.SnowFlakeStart) - time.Hour*time.Duration(p.LifeSpanHours)) / time.Millisecond
 
 	if thresold < 0 {
 		thresold = 0

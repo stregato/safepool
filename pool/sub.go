@@ -16,13 +16,18 @@ func (p *Pool) Sub(sub string, ids []string, apps []string) (Config, error) {
 		name = path.Join(p.Name, fmt.Sprintf("#%s", sub))
 	}
 
-	c := Config{
-		Name:    name,
-		Public:  p.config.Public,
-		Private: p.config.Private,
+	pc, err := sqlGetPool(p.Name)
+	if core.IsErr(err, "cannot load config for pool %s: %v", p.Name) {
+		return Config{}, err
 	}
 
-	err := Define(c)
+	c := Config{
+		Name:    name,
+		Public:  pc.Public,
+		Private: pc.Private,
+	}
+
+	err = Define(c)
 	if core.IsErr(err, "cannot define Forked pool %s: %v", name) {
 		return Config{}, err
 	}

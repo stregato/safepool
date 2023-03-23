@@ -1,16 +1,16 @@
 package pool
 
 import (
-	"bytes"
-	"hash"
-	"math/rand"
+	"fmt"
 	"os"
 	"path"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/security"
-	"github.com/code-to-go/safepool/transport"
+	"github.com/code-to-go/safepool/storage"
 	"github.com/godruoyi/go-snowflake"
 )
 
@@ -22,27 +22,31 @@ const (
 )
 
 type Access struct {
-	Id      string
-	State   State
-	ModTime time.Time
+	UserId string    `json:"userId"`
+	State  State     `json:"state"`
+	Since  time.Time `json:"since"`
 }
 
 type AccessKey struct {
-	Access Access
-	Key    []byte
+	UserId string    `json:"userId"`
+	Value  []byte    `json:"key"`
+	Since  time.Time `json:"since"`
 }
 
 type AccessFile struct {
-	Version     float32
-	PoolId      uint64
-	AccessKeys  []AccessKey
-	Nonce       []byte
-	MasterKeyId uint64
-	Keystore    []byte
-	Apps        []string
+	Id          uint64      `json:"id"`
+	Version     float32     `json:"version"`
+	PoolId      uint64      `json:"poolId"`
+	Keys        []AccessKey `json:"keys"`
+	Nonce       []byte      `json:"nonce"`
+	MasterKeyId uint64      `json:"masterKeyId"`
+	Keystore    []byte      `json:"keystore"`
+	Apps        []string    `json:"apps"`
 }
 
-const IdentityFolder = "identities"
+const identityFolder = "identities"
+const accessFolder = "access"
+const touchFile = ".touch"
 
 func (p *Pool) SetAccess(userId string, state State) error {
 	_, ok, _ := security.GetIdentity(userId)
@@ -59,162 +63,216 @@ func (p *Pool) SetAccess(userId string, state State) error {
 	}
 
 	err := p.sqlSetAccess(Access{
-		Id:      userId,
-		State:   state,
-		ModTime: core.Now(),
+		UserId: userId,
+		State:  state,
+		Since:  core.Now(),
 	})
 	if core.IsErr(err, "cannot link identity '%s' to pool '%s': %v", userId, p.Name) {
 		return err
 	}
 
-	err = p.exportAccessFile(p.e)
-	go func() {
-		p.mutex.Lock()
-		defer p.mutex.Unlock()
-
-		for _, e := range p.exchangers {
-			if e != p.e {
-				p.exportAccessFile(e)
-			}
-		}
-	}()
 	return err
 }
 
-func (p *Pool) syncIdentities(e transport.Exchanger) error {
-	security.SetIdentity(p.Self)
-	security.Trust(p.Self, true)
+func (p *Pool) ExportSelf(force bool) error {
+	return p.exportSelf(p.e, force)
+}
 
-	name := path.Join(p.Name, IdentityFolder, p.Self.Id())
-	_, err := e.Stat(name)
-	if err != nil {
-		err = p.writeIdentity(e, name, p.Self)
-		if core.IsErr(err, "cannot write identity to '%s': %v", name) {
-			return err
+func (p *Pool) exportSelf(e storage.Storage, force bool) error {
+	name := path.Join(p.Name, identityFolder, p.Self.Id())
+	if !force {
+		_, err := e.Stat(name)
+		if err == nil {
+			return nil
 		}
 	}
 
-	err = p.importIdentities(e)
-	if core.IsErr(err, "cannot import identities: %v") {
+	err := p.writeIdentity(e, name, p.Self)
+	if core.IsErr(err, "cannot write identity to '%s': %v", name) {
 		return err
 	}
 
+	p.updateGuard(false, identityFolder, touchFile)
 	return nil
 }
 
-func (p *Pool) importIdentity(e transport.Exchanger, id string) error {
-	name := path.Join(p.Name, IdentityFolder, id)
-	i, err := p.readIdentity(e, name)
-	if !core.IsErr(err, "cannot read identity from '%s': %v", name) {
-		security.SetIdentity(i)
+func (p *Pool) syncIdentities(e storage.Storage) error {
+	if !p.checkGuard(identityFolder, touchFile) {
+		return nil
 	}
-	return err
-}
 
-func (p *Pool) importIdentities(e transport.Exchanger) error {
-	ls, err := e.ReadDir(path.Join(p.Name, IdentityFolder), 0)
+	ls, err := e.ReadDir(path.Join(p.Name, identityFolder), 0)
 	if core.IsErr(err, "cannot list files from %s: %v", e) {
 		return err
-	}
-
-	identities, err := security.Identities()
-	if core.IsErr(err, "cannot process identities: %v") {
-		return err
-	}
-	m := map[string]security.Identity{}
-	for _, i := range identities {
-		m[i.Id()] = i
 	}
 
 	selfId := p.Self.Id()
 	for _, l := range ls {
 		n := l.Name()
-		if n == selfId {
-			continue
-		}
-
-		identity, ok := m[n]
-		if !ok || identity.Nick == "" || rand.Intn(100) > 95 {
-			p.importIdentity(e, n)
+		if strings.HasPrefix(n, ".") && n != selfId {
+			name := path.Join(p.Name, identityFolder, n)
+			i, err := p.readIdentity(e, name)
+			if !core.IsErr(err, "cannot read identity from '%s': %v", name) {
+				security.SetIdentity(i)
+			}
 		}
 	}
+	p.updateGuard(false, identityFolder, touchFile)
 	return nil
 }
 
-func (p *Pool) syncAccess() error {
-	_, err := p.syncAccessFor(p.e)
+func (p *Pool) SyncAccess() error {
+	err := p.syncAccessFor(p.e)
 	if err != nil {
 		return err
 	}
 
-	if AvailableBandwidth >= MediumBandwidth {
-		go func() {
-			p.mutex.Lock()
-			for _, e := range p.exchangers {
-				if e != p.e {
-					p.syncAccessFor(e)
-				}
-			}
-			p.mutex.Unlock()
-		}()
-	}
+	// if AvailableBandwidth >= MediumBandwidth {
+	// 	go func() {
+	// 		p.mutex.Lock()
+	// 		for _, e := range p.exchangers {
+	// 			if e != p.e {
+	// 				p.syncAccessFor(e)
+	// 			}
+	// 		}
+	// 		p.mutex.Unlock()
+	// 	}()
+	// }
 	return err
 }
 
-func (p *Pool) syncAccessFor(e transport.Exchanger) (hash.Hash, error) {
+func (p *Pool) syncAccessFor(e storage.Storage) error {
+
 	core.Info("sync access for %s", e.String())
 	err := p.syncIdentities(e)
 	if core.IsErr(err, "cannot sync own identity: %v") {
-		return nil, err
+		return err
 	}
 
-	l, err := p.lockAccessFile(e)
-	if core.IsErr(err, "cannot lock access on %s: %v", p.e) {
-		return nil, err
-	}
-	defer p.unlockAccessFile(e, l)
-
-	a, h, err := p.readAccessFile(e, ".access")
-	if os.IsNotExist(err) {
-		err = p.exportAccessFile(e)
-		return h, err
+	if !p.checkGuard(accessFolder, touchFile) {
+		core.Info("access checkpoint is recent, skip sync")
+		return nil
 	}
 
-	if core.IsErr(err, "cannot read access file:%v") {
-		return nil, err
+	updates, sources, requireExport, err := p.syncAccessFiles(e)
+	if err != nil {
+		return err
 	}
-	p.Apps = a.Apps
+	core.IsErr(err, "cannot save checkpoint to db: %v")
 
-	if bytes.Equal(h.Sum(nil), p.accessHash) {
-		return h, nil
+	switch len(sources) {
+	case 0:
+	case 1:
+		keyId := sources[0].MasterKeyId
+		keyValue := p.keyFunc(keyId)
+		p.sqlSetMasterKey(keyId, p.masterKeyId)
+		if core.IsErr(err, "cannot set master key for id '%d': %v", keyId) {
+			return err
+		}
+		p.masterKeyId = keyId
+		p.masterKey = keyValue
+	default:
+		err = p.updateMasterKey()
+		if core.IsErr(err, "cannot update master key: %v") {
+			return err
+		}
+		requireExport = true
 	}
 
-	requireExport, err := p.syncAccesses(a)
-	if core.IsErr(err, "cannot sync access: %v") {
-		return nil, err
+	for _, update := range updates {
+		err = p.sqlSetAccess(update)
+		if core.IsErr(err, "cannot update access information for user '%s': %v", update.UserId) {
+			return err
+		}
 	}
 
-	_, err = p.decodeKeystore(a.Keystore, a.Nonce)
-	if core.IsErr(err, "cannot import keystore: %v") {
-		return nil, err
-	}
-
-	p.accessHash = h.Sum(nil)
 	if requireExport {
 		err = p.exportAccessFile(e)
-		return h, err
+		if core.IsErr(err, "cannot export access file: %v", e) {
+			return err
+		}
 	}
+	p.updateGuard(requireExport, accessFolder, ".touch")
 
-	return h, nil
+	return nil
 }
 
-func (p *Pool) exportAccessFile(e transport.Exchanger) error {
+func (p *Pool) syncAccessFiles(e storage.Storage) (updates map[string]Access, sources []*AccessFile, requireExport bool, err error) {
+	_, accesses, err := p.sqlGetAccesses(false)
+	if core.IsErr(err, "cannot read access from db: %v", err) {
+		return nil, nil, false, err
+	}
+
+	am := map[string]Access{}
+	for _, access := range accesses {
+		am[access.UserId] = access
+	}
+
+	accessFiles, err := e.ReadDir(path.Join(p.Name, accessFolder), 0)
+	if !os.IsNotExist(err) && core.IsErr(err, "cannot read access folder in %s:%v", e.String()) {
+		return nil, nil, false, err
+	}
+	sort.Slice(accessFiles, func(i, j int) bool { return accessFiles[i].Name() > accessFiles[j].Name() })
+
+	if len(accessFiles) > 0 {
+		p.lastReadAccessFile = accessFiles[0].Name()
+	} else {
+		requireExport = true
+	}
+	updates = map[string]Access{}
+	for idx, accessFile := range accessFiles {
+		name := accessFile.Name()
+		if name[0] == '.' {
+			continue
+		}
+
+		_, af, err := p.readAccessFile(e, name)
+		if core.IsErr(err, "cannot read access file %s: %v", name) {
+			return nil, nil, false, err
+		}
+
+		_, masterkeyValue, err := p.extractMasterKey(af)
+		if core.IsErr(err, "cannot extract master key from %s: %v", accessFile.Name()) {
+			return nil, nil, false, err
+		}
+		if masterkeyValue == nil {
+			if idx == 0 {
+				return nil, nil, false, ErrNotAuthorized
+			}
+			continue
+		}
+		_, err = p.decodeKeystore(masterkeyValue, af.Keystore, af.Nonce)
+		if core.IsErr(err, "cannot import keystore: %v") {
+			return nil, nil, false, err
+		}
+
+		updateIns, updateOuts := p.mergeWithFile(&af, am, updates)
+		if updateIns > 0 {
+			sources = append(sources, &af)
+		}
+		if updateOuts > 0 {
+			requireExport = true
+		}
+	}
+
+	return updates, sources, requireExport, nil
+}
+
+func (p *Pool) exportAccessFile(e storage.Storage) error {
+	if !core.TimeIsSync() {
+		return ErrNoSyncClock
+	}
+
+	if p.masterKeyId == 0 {
+		return ErrNotAuthorized
+	}
+
 	identities, accesses, err := p.sqlGetAccesses(false)
 	if core.IsErr(err, "cannot read identities from db for '%s': %v", p.Name) {
 		return err
 	}
 
-	var accessKeys []AccessKey
+	var keys []AccessKey
 	for idx, access := range accesses {
 		var key []byte
 		identity := identities[idx]
@@ -224,9 +282,10 @@ func (p *Pool) exportAccessFile(e transport.Exchanger) error {
 				key = k
 			}
 		}
-		accessKeys = append(accessKeys, AccessKey{
-			Access: access,
-			Key:    key,
+		keys = append(keys, AccessKey{
+			UserId: access.UserId,
+			Since:  access.Since,
+			Value:  key,
 		})
 	}
 
@@ -236,91 +295,87 @@ func (p *Pool) exportAccessFile(e transport.Exchanger) error {
 	}
 
 	a := AccessFile{
+		Id:          snowflake.ID(),
 		Version:     1.0,
 		PoolId:      p.Id,
-		AccessKeys:  accessKeys,
+		Keys:        keys,
 		Nonce:       nonce,
 		MasterKeyId: p.masterKeyId,
 		Keystore:    keystore,
 		Apps:        p.Apps,
 	}
-	_, err = p.writeAccessFile(e, a)
-	if core.IsErr(err, "cannot write access file: %v") {
+	name := fmt.Sprintf("%d", a.Id)
+	err = p.writeAccessFile(e, a, name)
+	if core.IsErr(err, "cannot write access file '%s': %v", name) {
 		return err
 	}
+
+	accessFolder := path.Join(p.Name, accessFolder)
+	accessFiles, err := e.ReadDir(accessFolder, 0)
+	if !os.IsNotExist(err) && core.IsErr(err, "cannot read access folder in %s:%v", e.String()) {
+		return err
+	}
+	for _, accessFile := range accessFiles {
+		if accessFile.Name() <= p.lastReadAccessFile {
+			e.Delete(path.Join(accessFolder, accessFile.Name()))
+		}
+	}
+
 	return nil
 }
 
-func (p *Pool) syncAccesses(a AccessFile) (requireExport bool, err error) {
-	var needNewMasterKey bool
-	identities, accesses, err := p.sqlGetAccesses(false)
-	if core.IsErr(err, "cannot read identities during grant import: %v", err) {
-		return false, err
-	}
-	amap := map[string]Access{}
-	for _, access := range accesses {
-		amap[access.Id] = access
-	}
-	imap := map[string]security.Identity{}
-	for _, identity := range identities {
-		imap[identity.Id()] = identity
-	}
-
+func (p *Pool) extractMasterKey(a AccessFile) (masterKeyId uint64, masterKey []byte, err error) {
 	selfId := p.Self.Id()
-	for _, accessKey := range a.AccessKeys {
-		if accessKey.Access.Id == selfId {
-			masterKey, err := security.EcDecrypt(p.Self, accessKey.Key)
+	for _, key := range a.Keys {
+		if key.UserId == selfId {
+			masterKey, err := security.EcDecrypt(p.Self, key.Value)
 			if core.IsErr(err, "cannot derive master key for pool '%s'", p.Name) {
-				return false, err
+				return 0, nil, err
 			}
-			p.masterKey = masterKey
-			p.masterKeyId = a.MasterKeyId
 			err = p.sqlSetKey(a.MasterKeyId, masterKey)
 			if core.IsErr(err, "cannot save master key: %v") {
-				return false, err
+				return 0, nil, err
 			}
-		}
-
-		if accessKey.Key == nil {
-			requireExport = true
-		}
-
-		access, isInDb := amap[accessKey.Access.Id]
-		if !isInDb {
-			switch {
-			case accessKey.Access.ModTime.After(access.ModTime):
-				err = p.sqlSetAccess(accessKey.Access)
-				core.IsErr(err, "cannot set access for identity '%s' on pool '%s': %v", access.Id, p.Name)
-			case accessKey.Access.ModTime.Before(access.ModTime):
-				requireExport = true
-				needNewMasterKey = needNewMasterKey || accessKey.Access.State != access.State && access.State == Disabled
-			}
-		}
-		delete(amap, access.Id)
-	}
-
-	requireExport = requireExport || len(amap) > 0
-	if p.masterKeyId == 0 {
-		return false, ErrNotAuthorized
-	}
-
-	if needNewMasterKey {
-		err = p.updateMasterKey()
-		if core.IsErr(err, "cannot update master encryption key for pool '%s': %v", p.Name) {
-			return false, err
+			return a.MasterKeyId, masterKey, nil
 		}
 	}
+	return 0, nil, nil
+}
 
-	return requireExport, nil
+func (p *Pool) mergeWithFile(af *AccessFile, am map[string]Access, updates map[string]Access) (updateIns, updateOuts int) {
+	for _, key := range af.Keys {
+		a, isInDb := am[key.UserId]
+		if isInDb && key.Since == a.Since {
+			continue
+		}
+		if isInDb && key.Since.Before(a.Since) {
+			updateOuts++
+			continue
+		}
+		a = Access{
+			UserId: key.UserId,
+			State:  core.If(key.Value == nil, Disabled, Active),
+			Since:  key.Since,
+		}
+		am[key.UserId] = a
+		updates[key.UserId] = a
+		updateIns++
+	}
+	return updateIns, updateOuts
 }
 
 func (p *Pool) updateMasterKey() error {
-	p.masterKeyId = snowflake.ID()
-	p.masterKey = security.GenerateBytesKey(32)
-	err := p.sqlSetKey(p.masterKeyId, p.masterKey)
+	keyId := snowflake.ID()
+	key := security.GenerateBytesKey(32)
+	err := p.sqlSetKey(keyId, key)
 	if core.IsErr(err, "çannot store master encryption key to db: %v") {
 		return err
 	}
-
+	p.sqlSetMasterKey(keyId, p.masterKeyId)
+	if core.IsErr(err, "cannot set master key for id '%d': %v", keyId) {
+		return err
+	}
+	p.masterKeyId = keyId
+	p.masterKey = key
 	return nil
 }

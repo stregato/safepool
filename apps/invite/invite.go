@@ -2,11 +2,14 @@ package invite
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/aes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
+	"io"
 	"strings"
 
 	"github.com/code-to-go/safepool/apps/common"
@@ -22,20 +25,20 @@ type Invite struct {
 	Subject      string            `json:"subject"`
 	Sender       security.Identity `json:"sender"`
 	RecipientIds []string          `json:"recipientIds"`
-	Config       *pool.Config      `json:"config"`
+	Name         string            `json:"name"`
+	Storages     []string          `json:"exchange"`
 }
 
 func (i Invite) Join() error {
-	if i.Config == nil {
+	if i.Storages == nil {
 		return core.ErrNotAuthorized
 	}
 
-	c := i.Config
-	if c.Name == "" || (len(c.Public)+len(c.Private)) == 0 {
-		core.IsErr(ErrInvalidToken, "invalid config '%v': %v", c)
+	if i.Name == "" {
+		core.IsErr(ErrInvalidToken, "invalid empty name in invite: %v")
 		return ErrInvalidToken
 	} else {
-		core.Info("valid token for pool '%s'", c.Name)
+		core.Info("valid token for pool '%s'", i.Name)
 	}
 
 	err := security.SetIdentity(i.Sender)
@@ -48,7 +51,7 @@ func (i Invite) Join() error {
 		return err
 	}
 
-	return pool.Define(*c)
+	return pool.Define(pool.Config{Name: i.Name, Public: i.Storages})
 }
 
 func Add(p *pool.Pool, i Invite) error {
@@ -96,118 +99,119 @@ func accept(p *pool.Pool, f pool.Head) {
 }
 
 type Token struct {
-	Subject    string            `json:"s"`
-	SenderId   string            `json:"e"`
-	SenderNick string            `json:"d"`
-	Noonce     []byte            `json:"n"`
-	Keys       map[string][]byte `json:"k"`
-	Config     []byte            `json:"c"`
+	Version    float32  `json:"v"`
+	Subject    string   `json:"s"`
+	SenderNick string   `json:"d"`
+	Name       string   `json:"n"`
+	Crc        uint32   `json:"c"`
+	Keys       [][]byte `json:"k"`
+	Storages   []byte   `json:"t"`
 }
+
+const tokenVersion = 1.0
 
 func Decode(self security.Identity, token string) (Invite, error) {
 	token = strings.ReplaceAll(token, "_", "/")
-	parts := strings.Split(token, ":")
-	if len(parts) != 2 {
-		return Invite{}, ErrInvalidToken
+	data, _ := base64.StdEncoding.DecodeString(token)
+	r, err := gzip.NewReader(bytes.NewReader(data))
+	if core.IsErr(err, "invalid token, cannot gunzip: %v") {
+		return Invite{}, err
 	}
 
-	tk64, sig64 := parts[0], parts[1]
-	tk, _ := base64.StdEncoding.DecodeString(tk64)
-	sig, _ := base64.StdEncoding.DecodeString(sig64)
+	var buf bytes.Buffer
+	_, err = io.Copy(&buf, r)
+	if core.IsErr(err, "invalid token, cannot gunzip: %v") {
+		return Invite{}, err
+	}
+	r.Close()
 
 	var t Token
-	err := json.Unmarshal(tk, &t)
-	if core.IsErr(err, "invalid json format for '%s': %v", tk) {
-		return Invite{}, ErrInvalidToken
+	senderId, err := security.Unmarshal(buf.Bytes(), &t, "g")
+	if core.IsErr(err, "invalid token, cannot unmarshal: %v") {
+		return Invite{}, err
 	}
 
-	if !security.Verify(t.SenderId, tk, sig) {
-		core.IsErr(security.ErrInvalidSignature, "token has invalid signature: %v")
-		return Invite{}, security.ErrInvalidSignature
+	sender, err := security.IdentityFromId(senderId)
+	if core.IsErr(err, "invalid sender id: %v") {
+		return Invite{}, err
 	}
-
-	sender, ok, _ := security.GetIdentity(t.SenderId)
-	if !ok {
-		sender, err = security.IdentityFromId(t.SenderId)
-		if core.IsErr(err, "cannot create identity from Id: %v") {
-			return Invite{}, err
-		}
-		sender.Nick = t.SenderNick
-	}
+	sender.Nick = t.SenderNick
 	i := Invite{
 		Subject: t.Subject,
 		Sender:  sender,
+		Name:    t.Name,
 	}
 
-	var masterKey []byte
-	selfId := self.Id()
-	for id, key := range t.Keys {
-		i.RecipientIds = append(i.RecipientIds, id)
-		if id == selfId {
-			masterKey, err = security.EcDecrypt(self, key)
-			if core.IsErr(err, "cannot decrypt master key from '%s': %v", key) {
-				return Invite{}, err
+	if len(t.Keys) > 0 {
+		noonce := []byte(senderId)[0:aes.BlockSize]
+		for _, key := range t.Keys {
+			key, err = security.EcDecrypt(self, key)
+			if err != nil {
+				continue
 			}
-		}
-	}
-	if masterKey != nil {
-		t.Config, err = security.DecryptBlock(masterKey, t.Noonce, t.Config)
-		if core.IsErr(err, "cannot decrypt token '%v' with found masterKey: %v", t.Config) {
-			return i, err
-		}
-		var c pool.Config
-		err = json.Unmarshal(t.Config, &c)
-		if core.IsErr(err, "cannot unmarshal config inside token '%v': %v", t.Config) {
-			return i, err
-		}
-		i.Config = &c
-	}
 
+			decrypted, err := security.DecryptBlock(key, noonce, t.Storages)
+			if err != nil {
+				continue
+			}
+			if crc32.Checksum(decrypted, crc32.IEEETable) != uint32(t.Crc) {
+				continue
+			}
+			t.Storages = decrypted
+			goto proceed
+		}
+		return i, nil
+	}
+proceed:
+	err = json.Unmarshal(t.Storages, &i.Storages)
+	if core.IsErr(err, "cannot unmarshal storages in token: %v") {
+		return Invite{}, nil
+	}
 	return i, nil
 }
 
 func Encode(i Invite) (string, error) {
-	c, err := json.Marshal(i.Config)
-	if core.IsErr(err, "cannot marshal config to token: %v") {
-		return "", err
-	}
+	var keys [][]byte
 
-	t := Token{
-		Subject:    i.Subject,
-		SenderId:   i.Sender.Id(),
-		SenderNick: i.Sender.Nick,
-		Keys:       map[string][]byte{},
-		Config:     c,
-	}
-	if len(i.RecipientIds) > 0 {
-		t.Noonce = security.GenerateBytesKey(aes.BlockSize)
-		masterKey := security.GenerateBytesKey(32)
-		t.Config, err = security.EncryptBlock(masterKey, t.Noonce, c)
-		if core.IsErr(err, "cannot encrypt token: %v") {
-			return "", err
-		}
-		for _, id := range i.RecipientIds {
-			identity, err := security.IdentityFromId(id)
+	masterKey := security.GenerateBytesKey(32)
+	for _, id := range i.RecipientIds {
+		identity, err := security.IdentityFromId(id)
+		if err == nil {
+			key, err := security.EcEncrypt(identity, masterKey)
 			if err == nil {
-				key, err := security.EcEncrypt(identity, masterKey)
-				if err == nil {
-					t.Keys[id] = key
-				}
+				keys = append(keys, key)
 			}
 		}
 	}
-
-	tk, err := json.Marshal(t)
-	if core.IsErr(err, "cannot marshal token: %v") {
+	storages, err := json.Marshal(i.Storages)
+	if core.IsErr(err, "cannot marshal storages in invite: %v") {
 		return "", err
 	}
-	sig, err := security.Sign(i.Sender, tk)
-	if core.IsErr(err, "cannot sign with host key: %v") {
-		return "", err
+	crc := crc32.Checksum(storages, crc32.IEEETable)
+
+	if len(keys) > 0 {
+		noonce := []byte(i.Sender.Id())[0:aes.BlockSize]
+		storages, err = security.EncryptBlock(masterKey, noonce, storages)
+		if core.IsErr(err, "cannot encrypt token: %v") {
+			return "", err
+		}
+	}
+	t := Token{
+		Version:    tokenVersion,
+		Subject:    i.Subject,
+		SenderNick: i.Sender.Nick,
+		Name:       i.Name,
+		Crc:        crc,
+		Keys:       keys,
+		Storages:   storages,
 	}
 
-	return strings.ReplaceAll(fmt.Sprintf("%s:%s",
-		base64.StdEncoding.EncodeToString(tk),
-		base64.StdEncoding.EncodeToString(sig)), "/", "_"), nil
+	data, err := security.Marshal(i.Sender, &t, "g")
 
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	io.Copy(w, bytes.NewReader(data))
+	w.Close()
+
+	return strings.ReplaceAll(base64.StdEncoding.EncodeToString(buf.Bytes()), "/", "_"), err
 }

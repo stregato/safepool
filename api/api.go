@@ -28,6 +28,9 @@ var Self security.Identity
 //go:embed sqlite.sql
 var sqlliteDDL string
 
+//go:embed fish.png
+var defaultAvatar []byte
+
 // SetDbPath set the full path where the DB will be created. Useful on Android/iOS platforms
 func SetDbPath(dbPath string) {
 	sql.DbPath = dbPath
@@ -42,46 +45,35 @@ func Start(dbPath string, availableBandwith pool.Bandwidth) error {
 	sql.InitDDL = sqlliteDDL
 	pool.AvailableBandwidth = availableBandwith
 
-	err := sql.OpenDB(dbPath)
-	if core.IsErr(err, "cannot open DB: %v") {
-		return err
-	}
-
-	s, _, _, ok := sqlGetConfig("", "SELF")
-	if ok {
-		Self, err = security.IdentityFromBase64(s)
-	} else {
-		r := rand.New(rand.NewSource(time.Now().UnixNano()))
-		name := fmt.Sprintf("%s%d", names[r.Intn(len(names))], r.Intn(100))
-		Self, err = security.NewIdentity(name)
-		if err == nil {
-			s, err = Self.Base64()
-			if err == nil {
-				err = sqlSetConfig("", "SELF", s, 0, nil)
-			}
-			if core.IsErr(err, "çannot save identity to db: %v") {
-				panic("cannot save identity in db")
-			}
-
-			err = security.SetIdentity(Self)
-			if core.IsErr(err, "çannot save identity to db: %v") {
-				panic("cannot save identity in db")
-			}
-
-			err = security.Trust(Self, true)
-			if core.IsErr(err, "çannot set trust of '%s' on db: %v", Self.Nick) {
-				panic("cannot trust Self in db")
-			}
-
-		}
-
-	}
-
 	pools = cache.New(time.Hour, time.Hour)
 	pools.OnEvicted(func(name string, p interface{}) {
 		core.Info("closing pool %s", name)
 		p.(*pool.Pool).Close()
 	})
+
+	err := sql.OpenDB(dbPath)
+	if core.IsErr(err, "cannot open DB: %v") {
+		return err
+	}
+
+	s, _, _, ok := sql.GetConfig("", "SELF")
+	if ok {
+		Self, err = security.IdentityFromBase64(s)
+	} else {
+		r := rand.New(rand.NewSource(time.Now().UnixNano()))
+		name := fmt.Sprintf("%s%d", names[r.Intn(len(names))], r.Intn(100))
+		identity, err := security.NewIdentity(name)
+		identity.Avatar = defaultAvatar
+		if core.IsErr(err, "cannot create identity:%v") {
+			return err
+		}
+		err = setSelf(identity)
+		if core.IsErr(err, "cannot update self:%v") {
+			return err
+		}
+
+	}
+
 	return err
 }
 
@@ -94,9 +86,8 @@ func Stop() error {
 
 func FactoryReset() error {
 	err := Stop()
-	if core.IsErr(err, "cannot stop application: %v") {
-		return err
-	}
+	core.IsErr(err, "cannot stop application: %v")
+
 	err = sql.DeleteDB()
 	if core.IsErr(err, "cannot delete db '%s': %v", sql.DbPath) {
 		return err
@@ -107,15 +98,47 @@ func FactoryReset() error {
 	return err
 }
 
-func SetNick(nick string) error {
-	Self.Nick = nick
-	s, err := Self.Base64()
-	if core.IsErr(err, "cannot serialize self to db: %v") {
-		return err
+func setSelf(identity security.Identity) error {
+	s, err := identity.Base64()
+	if err == nil {
+		err = sql.SetConfig("", "SELF", s, 0, nil)
 	}
-	err = sqlSetConfig("", "SELF", s, 0, nil)
-	core.IsErr(err, "cannot save nick to db: %v")
-	return err
+	if core.IsErr(err, "cannot save identity to db: %v") {
+		panic("cannot save identity in db")
+	}
+
+	err = security.SetIdentity(identity)
+	if core.IsErr(err, "cannot save identity to db: %v") {
+		panic("cannot save identity in db")
+	}
+
+	err = security.Trust(identity, true)
+	if core.IsErr(err, "cannot set trust of '%s' on db: %v", identity.Nick) {
+		panic("cannot trust Self in db")
+	}
+	Self = identity
+
+	go func() {
+		for _, name := range pool.List() {
+			p, err := pool.Open(Self, name)
+			if err == nil {
+				p.ExportSelf(true)
+				p.Close()
+			}
+		}
+	}()
+
+	return nil
+}
+
+func SetSelf(identity security.Identity) error {
+	if identity.Id() != Self.Id() {
+		Stop()
+		setSelf(identity)
+		return Start(sql.DbPath, pool.AvailableBandwidth)
+	} else {
+		return setSelf(identity)
+	}
 }
 
 func PoolCreate(c pool.Config, apps []string) error {
@@ -139,16 +162,16 @@ func PoolJoin(token string) (pool.Config, error) {
 		return pool.Config{}, err
 	}
 
-	if i.Config == nil {
+	if i.Storages == nil {
 		return pool.Config{}, core.ErrNotAuthorized
 	}
-	PoolLeave(i.Config.Name)
+	PoolLeave(i.Name)
 	err = i.Join()
-	if core.IsErr(err, "cannot join pool '%s': %v", i.Config.Name) {
-		return *i.Config, err
+	if core.IsErr(err, "cannot join pool '%s': %v", i.Name) {
+		return pool.Config{}, err
 	}
 
-	return *i.Config, nil
+	return pool.Config{Name: i.Name, Public: i.Storages}, nil
 }
 
 func PoolLeave(name string) error {
@@ -194,8 +217,9 @@ func PoolSub(name string, sub string, ids []string, apps []string) (string, erro
 	}
 
 	i := invite.Invite{
-		Config:       &c,
 		Sender:       p.Self,
+		Name:         c.Name,
+		Storages:     c.Public,
 		RecipientIds: ids,
 	}
 
@@ -231,10 +255,12 @@ func PoolInvite(name string, ids []string, invitePool string) (string, error) {
 			return "", err
 		}
 	}
+	p.SyncAccess()
 
 	i := invite.Invite{
-		Config:       &c,
 		Sender:       p.Self,
+		Name:         c.Name,
+		Storages:     c.Public,
 		RecipientIds: ids,
 	}
 
@@ -268,7 +294,7 @@ func PoolUsers(poolName string) ([]security.Identity, error) {
 }
 
 func getChatName(private chat.Private) string {
-	if private == nil {
+	if len(private) == 0 {
 		return "chat"
 	} else {
 		return "private"

@@ -11,6 +11,7 @@ import (
 
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/security"
+	"github.com/code-to-go/safepool/sql"
 )
 
 const FeedsFolder = "feeds"
@@ -35,17 +36,21 @@ func (p *Pool) getSlots(last string) ([]string, error) {
 
 func (p *Pool) Sync() ([]Head, error) {
 	if core.Since(p.lastAccessSync) >= SyncAccessFrequency {
-		p.syncAccess()
+		p.SyncAccess()
 		p.lastAccessSync = core.Now()
 	}
 
-	tag := fmt.Sprintf("feeds@%s", p.e.String())
-	lastSlot, modTime, err := sqlGetCheckpoint(p.Name, tag)
-	if core.IsErr(err, "cannot read checkpoint for pool '%s': %v", p.Name) {
-		return nil, err
-	}
+	configNode := fmt.Sprintf("pool/%s", p.Name)
+	checkpointKey := fmt.Sprintf("checkpoints/%s", p.e.String())
+	slotKey := fmt.Sprintf("slots/%s", p.e.String())
+	_, lastCheckpoint, _, _ := sql.GetConfig(configNode, checkpointKey)
+	lastSlot, _, _, _ := sql.GetConfig(configNode, slotKey)
 
-	if modTime > 0 && p.e.GetCheckpoint(path.Join(p.Name, FeedsFolder, ".touch")) <= modTime {
+	var checkpoint int64
+	if stat, err := p.e.Stat(path.Join(p.Name, FeedsFolder, ".touch")); err == nil {
+		checkpoint = stat.ModTime().UnixMilli()
+	}
+	if lastCheckpoint > 0 && checkpoint <= lastCheckpoint {
 		core.Info("checkpoint is recent, skip sync")
 		return nil, nil
 	}
@@ -63,7 +68,7 @@ func (p *Pool) Sync() ([]Head, error) {
 	}
 
 	core.Debug("find slots: %v", strings.Join(slots, ","))
-	pendingFeeds := 0
+	skippedFeeds := 0
 	thresold := p.BaseId()
 	for _, slot := range slots {
 		fs, err := p.e.ReadDir(path.Join(p.Name, FeedsFolder, slot), 0)
@@ -97,18 +102,15 @@ func (p *Pool) Sync() ([]Head, error) {
 
 			f, err := p.readHead(p.e, n)
 			if core.IsErr(err, "cannot read file %s from %s: %v", n, p.e) {
-				pendingFeeds++
+				skippedFeeds++
 				continue
 			}
 
-			identity, ok, _ := security.GetIdentity(f.AuthorId)
-			if !ok || identity.Nick == "" {
-				err = p.importIdentity(p.e, f.AuthorId)
-				if err != nil {
-					pendingFeeds++
-					core.Info("feed with unknown id '%s', skip sync", f.AuthorId)
-					continue
-				}
+			_, ok, _ := security.GetIdentity(f.AuthorId)
+			if !ok {
+				skippedFeeds++
+				core.Info("feed with unknown id '%s', skip sync", f.AuthorId)
+				continue
 			}
 
 			f.Slot = slot
@@ -118,13 +120,12 @@ func (p *Pool) Sync() ([]Head, error) {
 			hs = append(hs, f)
 		}
 		lastSlot = slot
+		if skippedFeeds == 0 {
+			sql.SetConfig(configNode, slotKey, slot, 0, nil)
+		}
 	}
-	if pendingFeeds == 0 {
-		err = sqlSetCheckpoint(p.Name, fmt.Sprintf("feeds@%s", p.e.String()), lastSlot, modTime)
-		core.IsErr(err, "cannot save checkpoint to db: %v")
-	}
-	core.Info("sync completed, %d new heads, pendingFeeds %d, slot '%s', modTime %d", len(hs), pendingFeeds,
-		lastSlot, modTime)
+	core.Info("sync completed, %d new heads, pendingFeeds %d, slot '%s', modTime %d", len(hs), skippedFeeds,
+		lastSlot, lastCheckpoint)
 
 	if AvailableBandwidth != LowBandwidth && core.Since(p.lastHouseKeeping) > HouseKeepingPeriod {
 		go func() {
