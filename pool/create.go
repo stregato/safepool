@@ -22,11 +22,11 @@ func Create(self security.Identity, name string, apps []string) (*Pool, error) {
 	}
 
 	p := &Pool{
-		Name:             name,
-		Id:               snowflake.ID(),
-		Self:             self,
-		lastAccessSync:   core.Now(),
-		lastHouseKeeping: core.Now(),
+		Name:           name,
+		Id:             snowflake.ID(),
+		Self:           self,
+		lastAccessSync: core.Now(),
+		lastReplica:    core.Now(),
 	}
 	security.Trust(p.Self, true)
 

@@ -55,7 +55,7 @@ func (p *Pool) SetAccess(userId string, state State) error {
 		if core.IsErr(err, "id '%s' is invalid: %v") {
 			return err
 		}
-		identity.Nick = ""
+
 		err = security.SetIdentity(identity)
 		if core.IsErr(err, "cannot save identity '%s' to db: %v", identity) {
 			return err
@@ -70,6 +70,7 @@ func (p *Pool) SetAccess(userId string, state State) error {
 	if core.IsErr(err, "cannot link identity '%s' to pool '%s': %v", userId, p.Name) {
 		return err
 	}
+	p.touchGuard(accessFolder, touchFile)
 
 	return err
 }
@@ -92,12 +93,12 @@ func (p *Pool) exportSelf(e storage.Storage, force bool) error {
 		return err
 	}
 
-	p.updateGuard(false, identityFolder, touchFile)
+	p.touchGuard(identityFolder, touchFile)
 	return nil
 }
 
 func (p *Pool) syncIdentities(e storage.Storage) error {
-	if !p.checkGuard(identityFolder, touchFile) {
+	if p.checkGuard(identityFolder, touchFile) {
 		return nil
 	}
 
@@ -109,7 +110,7 @@ func (p *Pool) syncIdentities(e storage.Storage) error {
 	selfId := p.Self.Id()
 	for _, l := range ls {
 		n := l.Name()
-		if strings.HasPrefix(n, ".") && n != selfId {
+		if !strings.HasPrefix(n, ".") && n != selfId {
 			name := path.Join(p.Name, identityFolder, n)
 			i, err := p.readIdentity(e, name)
 			if !core.IsErr(err, "cannot read identity from '%s': %v", name) {
@@ -117,27 +118,27 @@ func (p *Pool) syncIdentities(e storage.Storage) error {
 			}
 		}
 	}
-	p.updateGuard(false, identityFolder, touchFile)
 	return nil
+}
+
+func (p *Pool) syncSecondaryExchanges() {
+	p.mutex.Lock()
+	for _, e := range p.exchangers {
+		if e != p.e {
+			err := p.syncAccessFor(e)
+			core.IsErr(err, "cannot synchronize secondary exchange '%s': %v", e.String())
+		}
+	}
+	p.mutex.Unlock()
 }
 
 func (p *Pool) SyncAccess() error {
 	err := p.syncAccessFor(p.e)
-	if err != nil {
+	if core.IsErr(err, "cannot sync privary exchange '%s': %v", p.e.String()) {
 		return err
 	}
+	go p.syncSecondaryExchanges()
 
-	// if AvailableBandwidth >= MediumBandwidth {
-	// 	go func() {
-	// 		p.mutex.Lock()
-	// 		for _, e := range p.exchangers {
-	// 			if e != p.e {
-	// 				p.syncAccessFor(e)
-	// 			}
-	// 		}
-	// 		p.mutex.Unlock()
-	// 	}()
-	// }
 	return err
 }
 
@@ -149,7 +150,7 @@ func (p *Pool) syncAccessFor(e storage.Storage) error {
 		return err
 	}
 
-	if !p.checkGuard(accessFolder, touchFile) {
+	if p.checkGuard(accessFolder, touchFile) {
 		core.Info("access checkpoint is recent, skip sync")
 		return nil
 	}
@@ -160,6 +161,7 @@ func (p *Pool) syncAccessFor(e storage.Storage) error {
 	}
 	core.IsErr(err, "cannot save checkpoint to db: %v")
 
+	p.sqlDelKey(p.BaseId())
 	switch len(sources) {
 	case 0:
 	case 1:
@@ -192,7 +194,6 @@ func (p *Pool) syncAccessFor(e storage.Storage) error {
 			return err
 		}
 	}
-	p.updateGuard(requireExport, accessFolder, ".touch")
 
 	return nil
 }
@@ -309,6 +310,7 @@ func (p *Pool) exportAccessFile(e storage.Storage) error {
 	if core.IsErr(err, "cannot write access file '%s': %v", name) {
 		return err
 	}
+	p.touchGuard(accessFolder, ".touch")
 
 	accessFolder := path.Join(p.Name, accessFolder)
 	accessFiles, err := e.ReadDir(accessFolder, 0)
@@ -316,8 +318,9 @@ func (p *Pool) exportAccessFile(e storage.Storage) error {
 		return err
 	}
 	for _, accessFile := range accessFiles {
-		if accessFile.Name() <= p.lastReadAccessFile {
-			e.Delete(path.Join(accessFolder, accessFile.Name()))
+		name := accessFile.Name()
+		if !strings.HasPrefix(name, ".") && name <= p.lastReadAccessFile {
+			e.Delete(path.Join(accessFolder, name))
 		}
 	}
 
@@ -349,7 +352,6 @@ func (p *Pool) mergeWithFile(af *AccessFile, am map[string]Access, updates map[s
 			continue
 		}
 		if isInDb && key.Since.Before(a.Since) {
-			updateOuts++
 			continue
 		}
 		a = Access{
@@ -361,7 +363,7 @@ func (p *Pool) mergeWithFile(af *AccessFile, am map[string]Access, updates map[s
 		updates[key.UserId] = a
 		updateIns++
 	}
-	return updateIns, updateOuts
+	return updateIns, len(am) - len(af.Keys)
 }
 
 func (p *Pool) updateMasterKey() error {

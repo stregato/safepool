@@ -2,32 +2,76 @@ package pool
 
 import (
 	"path"
+	"sort"
+	"time"
 
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/storage"
 )
 
+func (p *Pool) listReplicaSlots() []string {
+	m := map[string]bool{}
+
+	for _, e := range p.exchangers {
+		fs, _ := e.ReadDir(path.Join(p.Name, FeedsFolder), 0)
+		for _, f := range fs {
+			name := f.Name()
+			if f.IsDir() && name >= p.lastReplicaSlot {
+				m[name] = true
+			}
+		}
+	}
+	var slots []string
+	for s := range m {
+		slots = append(slots, s)
+	}
+	sort.Strings(slots)
+	return slots
+}
+
+func (p *Pool) startReplica() {
+	ticker := time.NewTicker(10 * time.Second)
+	p.quitReplica = make(chan bool)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				if core.Since(p.lastReplica) > HouseKeepingPeriods[AvailableBandwidth] {
+					p.replica()
+					p.lastReplica = core.Now()
+				}
+			case <-p.quitReplica:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+}
+func (p *Pool) stopReplica() {
+	p.quitReplica <- true
+}
+
 func (p *Pool) replica() {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 
+	slots := p.listReplicaSlots()
 	for _, e := range p.exchangers {
 		if e != p.e {
-			err := p.syncAccessFor(e)
-			if core.IsErr(err, "cannot sync access between %s and %s: %v", p.e, e) {
-				continue
+			for _, s := range slots {
+				err := p.syncContent(e, path.Join(FeedsFolder, s))
+				core.IsErr(err, "cannot sync slot %s for secondary %s during replica: %v", s, e)
 			}
-
-			for _, f := range []string{identityFolder, FeedsFolder} {
-				err = p.syncContent(e, f)
-				core.IsErr(err, "cannot access %s during replica: %v", e)
-			}
+			err := p.syncContent(e, identityFolder)
+			core.IsErr(err, "cannot sync identities for secondary %s during replica: %v", e)
 		}
 	}
+	p.lastReplicaSlot = core.If(len(slots) > 0, slots[len(slots)-1], "")
 }
 
 func (p *Pool) syncContent(e storage.Storage, folder string) error {
-	ls, _ := p.e.ReadDir(path.Join(p.Name, folder), 0)
+	folder = path.Join(p.Name, folder)
+	ls, _ := p.e.ReadDir(folder, 0)
 	m := map[string]bool{}
 	for _, l := range ls {
 		n := l.Name()
@@ -36,29 +80,22 @@ func (p *Pool) syncContent(e storage.Storage, folder string) error {
 		}
 	}
 
-	ls, _ = e.ReadDir(path.Join(p.Name, folder), 0)
+	ls, _ = e.ReadDir(folder, 0)
 	for _, l := range ls {
 		n := l.Name()
 		if n[0] != '.' && !m[n] {
-			n = path.Join(p.Name, n)
-			err := storage.CopyFile(p.e, n, e, n)
-			core.IsErr(err, "cannot clone '%s': %v", n)
-			core.Info("copied '%s' from '%s' to '%s'", e, p.e)
+			fn := path.Join(folder, n)
+			err := storage.CopyFile(p.e, fn, e, fn)
+			core.IsErr(err, "cannot clone '%s': %v", fn)
+			core.Info("copied '%s' from '%s' to '%s'", fn, e, p.e)
 		}
 		delete(m, n)
 	}
 
 	for n := range m {
-		n = path.Join(p.Name, folder, n)
-		stat, err := p.e.Stat(n)
-		if err == nil {
-			if stat.IsDir() {
-				err = p.syncContent(e, path.Join(folder, n))
-			} else {
-				err = storage.CopyFile(e, n, p.e, n)
-				core.Info("copied '%s' from '%s' to '%s'", p.e, e)
-			}
-		}
+		n = path.Join(folder, n)
+		err := storage.CopyFile(e, n, p.e, n)
+		core.Info("copied '%s' from '%s' to '%s'", p.e, e)
 		core.IsErr(err, "cannot clone '%s': %v", n)
 	}
 

@@ -28,6 +28,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.0.20 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.1.23 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.13.22 // indirect
+	github.com/bakape/thumbnailer v1.0.0 // indirect
+	github.com/bakape/thumbnailer/v2 v2.7.1 // indirect
+	github.com/nwaples/rardecode v1.1.0 // indirect
 	github.com/uhthomas/seekctr v0.0.0-20211121195710-e18b12545023 // indirect
 )
 

@@ -9,6 +9,8 @@ import (
 
 const defaultLifeSpanHours = 30 * 24
 
+var defaultApps = []string{"chat", "invite", "library", "private"}
+
 // Init initialized a domain on the specified exchangers
 func Open(self security.Identity, name string) (*Pool, error) {
 	config, err := sqlGetPool(name)
@@ -22,11 +24,14 @@ func Open(self security.Identity, name string) (*Pool, error) {
 		Apps:          config.Apps,
 		LifeSpanHours: config.LifeSpanHours,
 
-		lastAccessSync:   core.Now(),
-		lastHouseKeeping: core.Now(),
+		lastAccessSync: core.Now(),
+		lastReplica:    core.Now(),
 	}
-	if config.LifeSpanHours < 1 {
-		config.LifeSpanHours = defaultLifeSpanHours
+	if p.LifeSpanHours < 1 {
+		p.LifeSpanHours = defaultLifeSpanHours
+	}
+	if len(p.Apps) == 0 {
+		p.Apps = defaultApps
 	}
 
 	masterKeyId, masterKey, err := p.sqlGetMasterKey()
@@ -52,5 +57,7 @@ func Open(self security.Identity, name string) (*Pool, error) {
 	if p.masterKeyId == 0 || p.masterKey == nil {
 		return nil, ErrNotAuthorized
 	}
+
+	p.startReplica()
 	return p, nil
 }

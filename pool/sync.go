@@ -25,7 +25,7 @@ func (p *Pool) getSlots(last string) ([]string, error) {
 
 	var slots []string
 	for _, f := range fs {
-		if f.Name() >= last {
+		if f.Name() >= last && f.IsDir() {
 			slots = append(slots, f.Name())
 		}
 	}
@@ -34,12 +34,7 @@ func (p *Pool) getSlots(last string) ([]string, error) {
 	return slots, nil
 }
 
-func (p *Pool) Sync() ([]Head, error) {
-	if core.Since(p.lastAccessSync) >= SyncAccessFrequency {
-		p.SyncAccess()
-		p.lastAccessSync = core.Now()
-	}
-
+func (p *Pool) syncFeeds() ([]Head, error) {
 	configNode := fmt.Sprintf("pool/%s", p.Name)
 	checkpointKey := fmt.Sprintf("checkpoints/%s", p.e.String())
 	slotKey := fmt.Sprintf("slots/%s", p.e.String())
@@ -69,10 +64,17 @@ func (p *Pool) Sync() ([]Head, error) {
 
 	core.Debug("find slots: %v", strings.Join(slots, ","))
 	skippedFeeds := 0
-	thresold := p.BaseId()
+	idThresold := p.BaseId()
+	slotThresold := p.baseSlot()
 	for _, slot := range slots {
 		fs, err := p.e.ReadDir(path.Join(p.Name, FeedsFolder, slot), 0)
 		if core.IsErr(err, "cannot read content in slot %s in pool", slot, p) {
+			continue
+		}
+		if slot < slotThresold {
+			for _, f := range fs {
+				p.e.Delete(f.Name())
+			}
 			continue
 		}
 		core.Debug("%d files in folder %s/%s/%s", len(fs), p.Name, FeedsFolder, slot)
@@ -94,8 +96,8 @@ func (p *Pool) Sync() ([]Head, error) {
 			}
 
 			n := path.Join(p.Name, FeedsFolder, slot, name)
-			if id < int64(thresold) {
-				core.Debug("file '%s' has id %d lower than thresold %d; delete it", name, id, thresold)
+			if id < int64(idThresold) {
+				core.Debug("file '%s' has id %d lower than thresold %d; delete it", name, id, idThresold)
 				p.e.Delete(n)
 				continue
 			}
@@ -126,13 +128,27 @@ func (p *Pool) Sync() ([]Head, error) {
 	}
 	core.Info("sync completed, %d new heads, pendingFeeds %d, slot '%s', modTime %d", len(hs), skippedFeeds,
 		lastSlot, lastCheckpoint)
+	return hs, nil
+}
 
-	if AvailableBandwidth != LowBandwidth && core.Since(p.lastHouseKeeping) > HouseKeepingPeriod {
-		go func() {
-			p.HouseKeeping()
-			p.replica()
-			p.lastHouseKeeping = core.Now()
-		}()
+func (p *Pool) Sync() ([]Head, error) {
+	if core.Since(p.lastAccessSync) >= SyncAccessFrequency {
+		p.SyncAccess()
+		p.lastAccessSync = core.Now()
 	}
+
+	hs, err := p.syncFeeds()
+	if err != nil {
+		return nil, err
+	}
+
+	// if core.Since(p.lastReplica) > HouseKeepingPeriods[AvailableBandwidth] {
+	// 	go func() {
+	// 		//			p.HouseKeeping()
+	// 		time.Sleep(5 * time.Second)
+	// 		p.replica()
+	// 		p.lastReplica = core.Now()
+	// 	}()
+	// }
 	return hs, nil
 }

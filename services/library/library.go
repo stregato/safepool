@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/code-to-go/safepool/apps/common"
 	"github.com/code-to-go/safepool/core"
 	pool "github.com/code-to-go/safepool/pool"
 	"github.com/code-to-go/safepool/security"
+	"github.com/code-to-go/safepool/services/common"
 	"github.com/wailsapp/mimetype"
 )
 

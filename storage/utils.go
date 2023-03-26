@@ -68,6 +68,11 @@ func CopyFile(dest Storage, destName string, source Storage, sourceName string) 
 			return err
 		}
 
+		err = source.Read(sourceName, nil, file, nil)
+		if core.IsErr(err, "cannot read %s/%s: %v", source, sourceName) {
+			return err
+		}
+		file.Seek(0, 0)
 		r = file
 		defer func() {
 			file.Close()

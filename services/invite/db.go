@@ -14,7 +14,7 @@ func sqlSetInvite(pool string, ctime int64, i Invite) error {
 	}
 
 	_, err = sql.Exec("SET_INVITE", sql.Args{"pool": pool, "ctime": ctime,
-		"valid":   i.Storages != nil,
+		"valid":   i.Exchanges != nil,
 		"content": content})
 	if core.IsErr(err, "cannot set invite on db: %v") {
 		return err

@@ -26,11 +26,11 @@ type Invite struct {
 	Sender       security.Identity `json:"sender"`
 	RecipientIds []string          `json:"recipientIds"`
 	Name         string            `json:"name"`
-	Storages     []string          `json:"exchange"`
+	Exchanges    []string          `json:"exchanges"`
 }
 
 func (i Invite) Join() error {
-	if i.Storages == nil {
+	if i.Exchanges == nil {
 		return core.ErrNotAuthorized
 	}
 
@@ -51,7 +51,7 @@ func (i Invite) Join() error {
 		return err
 	}
 
-	return pool.Define(pool.Config{Name: i.Name, Public: i.Storages})
+	return pool.Define(pool.Config{Name: i.Name, Public: i.Exchanges})
 }
 
 func Add(p *pool.Pool, i Invite) error {
@@ -163,7 +163,7 @@ func Decode(self security.Identity, token string) (Invite, error) {
 		return i, nil
 	}
 proceed:
-	err = json.Unmarshal(t.Storages, &i.Storages)
+	err = json.Unmarshal(t.Storages, &i.Exchanges)
 	if core.IsErr(err, "cannot unmarshal storages in token: %v") {
 		return Invite{}, nil
 	}
@@ -183,7 +183,7 @@ func Encode(i Invite) (string, error) {
 			}
 		}
 	}
-	storages, err := json.Marshal(i.Storages)
+	storages, err := json.Marshal(i.Exchanges)
 	if core.IsErr(err, "cannot marshal storages in invite: %v") {
 		return "", err
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/code-to-go/safepool/core"
 	"github.com/sirupsen/logrus"
 )
 
@@ -15,7 +16,7 @@ var queriesCache = map[string]string{}
 var stmtCache = map[string]*sql.Stmt{}
 var ErrNoRows = sql.ErrNoRows
 
-func prepareStatement(key, s string, line int) {
+func prepareStatement(key, s string, line int) error {
 	key = strings.Trim(key, " ")
 	if _, ok := stmtCache[key]; ok {
 		logrus.Panicf("duplicate SQL statement for key '%s' (line %d)", s, line)
@@ -23,12 +24,12 @@ func prepareStatement(key, s string, line int) {
 	}
 
 	stmt, err := db.Prepare(s)
-	if err != nil {
-		logrus.Panicf("cannot compile SQL statement (%d) '%s': %v", line, s, err)
-		panic(err)
+	if core.IsErr(err, "cannot compile SQL statement (%d) '%s': %v", line, s) {
+		return err
 	}
 	stmtCache[key] = stmt
 	queriesCache[key] = s
+	return nil
 }
 
 func getStatement(key string) *sql.Stmt {

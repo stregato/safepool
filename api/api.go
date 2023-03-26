@@ -162,7 +162,7 @@ func PoolJoin(token string) (pool.Config, error) {
 		return pool.Config{}, err
 	}
 
-	if i.Storages == nil {
+	if i.Exchanges == nil {
 		return pool.Config{}, core.ErrNotAuthorized
 	}
 	PoolLeave(i.Name)
@@ -171,7 +171,7 @@ func PoolJoin(token string) (pool.Config, error) {
 		return pool.Config{}, err
 	}
 
-	return pool.Config{Name: i.Name, Public: i.Storages}, nil
+	return pool.Config{Name: i.Name, Public: i.Exchanges}, nil
 }
 
 func PoolLeave(name string) error {
@@ -219,7 +219,7 @@ func PoolSub(name string, sub string, ids []string, apps []string) (string, erro
 	i := invite.Invite{
 		Sender:       p.Self,
 		Name:         c.Name,
-		Storages:     c.Public,
+		Exchanges:    c.Public,
 		RecipientIds: ids,
 	}
 
@@ -260,7 +260,7 @@ func PoolInvite(name string, ids []string, invitePool string) (string, error) {
 	i := invite.Invite{
 		Sender:       p.Self,
 		Name:         c.Name,
-		Storages:     c.Public,
+		Exchanges:    c.Public,
 		RecipientIds: ids,
 	}
 

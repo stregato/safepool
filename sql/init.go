@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/code-to-go/safepool/core"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/sirupsen/logrus"
 )
@@ -41,21 +42,24 @@ func createTables() error {
 				return err
 			}
 		} else {
-			prepareStatement(key, ql, line)
+			err := prepareStatement(key, ql, line)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
 // LoadSQLFromFile loads the sql queries from the provided file path. It panics in case the file cannot be loaded
-func LoadSQLFromFile(name string) {
+func LoadSQLFromFile(name string) error {
 	ddl, err := os.ReadFile(name)
-	if err != nil {
-		logrus.Panicf("cannot load SQL queries from %s: %v", name, err)
-		panic(err)
+	if core.IsErr(err, "cannot load SQL queries from %s: %v", name) {
+		return err
 	}
 
 	InitDDL = string(ddl)
+	return nil
 }
 
 func OpenDB(dbPath string) error {

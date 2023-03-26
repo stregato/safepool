@@ -3,9 +3,9 @@ package pool
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"path"
 
+	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/sql"
 )
 
@@ -27,27 +27,16 @@ func (p *Pool) checkGuard(ph ...string) bool {
 		checkpoint = stat.ModTime().UnixMilli()
 	}
 
-	return checkpoint == 0 || lastCheckpoint == 0 || checkpoint <= lastCheckpoint
+	ok := checkpoint != 0 && lastCheckpoint != 0 && checkpoint <= lastCheckpoint
+	if !ok {
+		sql.SetConfig(configNode, tag, "", checkpoint, nil)
+	}
+	core.Debug("guard %s, %d < %d = %b", file, checkpoint, lastCheckpoint, ok)
+	return ok
 }
 
-func (p *Pool) updateGuard(hasChanges bool, ph ...string) {
-	configNode, file, tag := p.getGuardParams(ph...)
-	if hasChanges {
-		p.e.Write(file, bytes.NewReader(nil), 0, nil)
-	}
-	f, err := p.e.Stat(file)
-	if os.IsNotExist(err) {
-		p.e.Write(file, bytes.NewReader(nil), 0, nil)
-		f, err = p.e.Stat(file)
-	}
-	if err == nil {
-		sql.SetConfig(configNode, tag, "", f.ModTime().UnixMilli(), nil)
-	}
+func (p *Pool) touchGuard(ph ...string) {
+	_, file, _ := p.getGuardParams(ph...)
+	err := p.e.Write(file, bytes.NewReader(nil), 0, nil)
+	core.IsErr(err, "cannot touch guard: %v")
 }
-
-// func (p *Pool) resetGuard(ph ...string) {
-// 	phj := path.Join(ph...)
-// 	configNode := fmt.Sprintf("pool/%s", p.Name)
-// 	tag := fmt.Sprintf("%s/@%s", phj, p.e.String())
-// 	sql.SetConfig(configNode, tag, "", 0, nil)
-// }

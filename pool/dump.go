@@ -21,8 +21,8 @@ func (p *Pool) Dump() map[string]any {
 	m["exchangers"] = exchangers
 	m["lastAccessSync"] = p.lastAccessSync
 	m["lastAccessSyncElapsed"] = core.Since(p.lastAccessSync)
-	m["lastHouseKeeping"] = p.lastHouseKeeping
-	m["lastHouseKeepingElapsed"] = core.Since(p.lastHouseKeeping)
+	m["lastHouseKeeping"] = p.lastReplica
+	m["lastHouseKeepingElapsed"] = core.Since(p.lastReplica)
 
 	keystore, _ := p.sqlGetKeystore()
 	var keys []uint64

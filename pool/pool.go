@@ -21,6 +21,11 @@ const (
 )
 
 var AvailableBandwidth Bandwidth = HighBandwith
+var HouseKeepingPeriods = map[Bandwidth]time.Duration{
+	LowBandwidth:    time.Hour,
+	MediumBandwidth: 20 * time.Minute,
+	HighBandwith:    5 * time.Minute,
+}
 
 var ErrNoExchange = errors.New("no Exchange available")
 var ErrNotTrusted = errors.New("the author is not a trusted user")
@@ -60,7 +65,9 @@ type Pool struct {
 	masterKey          []byte
 	lastAccessSync     time.Time
 	lastReadAccessFile string
-	lastHouseKeeping   time.Time
+	lastReplica        time.Time
+	lastReplicaSlot    string
+	quitReplica        chan bool
 	ctime              int64
 	mutex              sync.Mutex
 }
@@ -84,7 +91,6 @@ const (
 )
 
 var ForceCreation = false
-var HouseKeepingPeriod = 10 * time.Minute
 var CacheSizeMB = 16
 var FeedDateFormat = "20060102"
 
@@ -107,6 +113,7 @@ func (p *Pool) List(ctime int64) ([]Head, error) {
 
 func (p *Pool) Close() {
 	p.mutex.Lock()
+	p.stopReplica()
 	for _, e := range p.exchangers {
 		_ = e.Close()
 	}

@@ -81,3 +81,7 @@ func (p *Pool) BaseId() uint64 {
 	}
 	return uint64(thresold) << (snowflake.SequenceLength + snowflake.MachineIDLength)
 }
+
+func (p *Pool) baseSlot() string {
+	return core.Now().Add(-time.Hour * time.Duration(p.LifeSpanHours)).Format(FeedDateFormat)
+}

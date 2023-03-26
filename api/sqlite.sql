@@ -110,6 +110,9 @@ INSERT INTO keys(pool,keyId,keyValue) VALUES(:pool,:keyId,:keyValue)
     ON CONFLICT(pool,keyId) DO UPDATE SET keyValue=:keyValue
 	    WHERE pool=:pool AND keyId=:keyId
 
+-- DELETE_KEYS_SMALLER
+DELETE FROM keys WHERE pool=:pool AND keyId < :smallerThan
+
 -- DELETE_KEYS
 DELETE FROM keys WHERE pool=:pool
 
@@ -317,3 +320,30 @@ INSERT INTO breakpoints(pool,app,ctime) VALUES(:pool,:app,:ctime)
 -- GET_BREAKPOINT
 SELECT ctime FROM breakpoints WHERE pool=:pool AND app=:app
 
+-- INIT
+CREATE TABLE IF NOT EXISTS reels (
+    pool VARCHAR(256) NOT NULL,
+    reel VARCHAR(256) NOT NULL,
+    thread VARCHAR(256) NOT NULL,
+    id INTEGER NOT NULL
+    name VARCHAR(256) NOT NULL,
+    author VARCHAR(128),
+    contentType VARCHAR(64),
+    ctime INTEGER NOT NULL,
+    thumbnail BLOB NOT NULL
+    CONSTRAINT pk_reels PRIMARY KEY(pool,reel,thread,id)
+);
+
+-- INIT
+CREATE INDEX IF NOT EXISTS idx_reals_ctime ON reels(ctime);
+
+-- SET_REEL
+INSERT INTO reels(pool,reel,thread,id,name,author,contentType,ctime,thumbnail)
+    VALUES(:pool,:reel,:thread,:id,:name,:author,:contentType,:ctime,:thumbnail)
+
+-- GET_REEL_THREADS
+SELECT DISTINCT thread FROM reels WHERE pool=:pool AND reel=:reel
+
+-- GET_REEL
+SELECT id,name,contentType,ctime,thumnail FROM reels WHERE pool=:pool AND reel=:reel 
+    AND thread=:thread AND ctime>:from AND ctime<:to

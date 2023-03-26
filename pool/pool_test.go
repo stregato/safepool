@@ -36,7 +36,6 @@ func TestSafeCreation(t *testing.T) {
 	assert.NoErrorf(t, err, "Cannot define pool: %v", err)
 
 	ForceCreation = true
-	HouseKeepingPeriod = 0
 	s, err := Create(self, "test.safepool.net/public", nil)
 	assert.NoErrorf(t, err, "Cannot create pool: %v", err)
 	s.Close()
@@ -77,7 +76,7 @@ func BenchmarkSafe(b *testing.B) {
 	assert.NoErrorf(b, err, "Cannot define pool: %v", err)
 
 	ForceCreation = true
-	HouseKeepingPeriod = 0
+
 	s, err := Create(self, "test.safepool.net/public", nil)
 	assert.NoErrorf(b, err, "Cannot create pool: %v", err)
 	s.Close()
@@ -118,7 +117,6 @@ func TestSafeReplica(t *testing.T) {
 	assert.NoErrorf(t, err, "Cannot define pool: %v", err)
 
 	ForceCreation = true
-	HouseKeepingPeriod = time.Second * 5
 
 	now := core.Now()
 	s, err := Create(self, "test.safepool.net/public", nil)

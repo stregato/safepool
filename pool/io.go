@@ -64,36 +64,36 @@ func (p *Pool) Send(name string, r io.ReadSeekCloser, size int64, meta []byte) (
 	core.Info("file '%s' sent to exchange '%s': id '%d', size '%d', hash '%s'", name, p.e, id,
 		size, base64.StdEncoding.EncodeToString(hash))
 
-	go func() {
-		p.mutex.Lock()
-		defer p.mutex.Unlock()
+	// go func() {
+	// 	p.mutex.Lock()
+	// 	defer p.mutex.Unlock()
 
-		for _, e := range p.exchangers {
-			if e == p.e {
-				continue
-			}
+	// 	for _, e := range p.exchangers {
+	// 		if e == p.e {
+	// 			continue
+	// 		}
 
-			r.Seek(0, 0)
-			hr.Seek(0, 0)
+	// 		r.Seek(0, 0)
+	// 		hr.Seek(0, 0)
 
-			_, err = p.writeFile(e, n, r, size)
-			if core.IsErr(err, "cannot send %s to secondary exchange %e: %v", n, e) {
-				continue
-			}
-			_, err = p.writeFile(e, hn, hr, int64(len(data)))
-			if core.IsErr(err, "cannot send %s to secondary exchange %e: %v", hn, e) {
-				continue
-			}
-			tn := path.Join(p.Name, FeedsFolder, ".touch")
-			err = storage.WriteFile(e, tn, nil)
-			core.IsErr(err, "cannot set checkpoint in %s: %v", p.e)
-			core.Info("file '%s' sent to exchange '%s': id '%d', size '%d', hash '%s'", name, e, id,
-				size, base64.StdEncoding.EncodeToString(hash))
+	// 		_, err = p.writeFile(e, n, r, size)
+	// 		if core.IsErr(err, "cannot send %s to secondary exchange %e: %v", n, e) {
+	// 			continue
+	// 		}
+	// 		_, err = p.writeFile(e, hn, hr, int64(len(data)))
+	// 		if core.IsErr(err, "cannot send %s to secondary exchange %e: %v", hn, e) {
+	// 			continue
+	// 		}
+	// 		tn := path.Join(p.Name, FeedsFolder, ".touch")
+	// 		err = storage.WriteFile(e, tn, nil)
+	// 		core.IsErr(err, "cannot set checkpoint in %s: %v", p.e)
+	// 		core.Info("file '%s' sent to exchange '%s': id '%d', size '%d', hash '%s'", name, e, id,
+	// 			size, base64.StdEncoding.EncodeToString(hash))
 
-		}
+	// 	}
 
-		r.Close()
-	}()
+	// 	r.Close()
+	// }()
 
 	return f, nil
 }

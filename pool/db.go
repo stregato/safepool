@@ -92,6 +92,12 @@ func (p *Pool) sqlSetKey(keyId uint64, value []byte) error {
 	return err
 }
 
+func (p *Pool) sqlDelKey(smallerThan uint64) error {
+	_, err := sql.Exec("DELETE_KEYS_SMALLER", sql.Args{"pool": p.Name, "smallerThan": smallerThan})
+	core.IsErr(err, "cannot set master key: %v")
+	return err
+}
+
 func (p *Pool) sqlGetMasterKey() (keyId uint64, keyValue []byte, err error) {
 	var value string
 	err = sql.QueryRow("GET_MASTER_KEY", sql.Args{"pool": p.Name}, &keyId, &value)
@@ -111,7 +117,7 @@ func (p *Pool) sqlSetMasterKey(keyId, oldKeyId uint64) error {
 
 func (p *Pool) sqlGetKeystore() (Keystore, error) {
 	rows, err := sql.Query("GET_KEYS", sql.Args{"pool": p.Name})
-	if core.IsErr(err, "cannot read keystore for pool %s: %v", p.Name) {
+	if err == sql.ErrNoRows || core.IsErr(err, "cannot read keystore for pool %s: %v", p.Name) {
 		return nil, err
 	}
 	defer rows.Close()
