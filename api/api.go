@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/code-to-go/safepool/apps/chat"
-	"github.com/code-to-go/safepool/apps/invite"
-	"github.com/code-to-go/safepool/apps/library"
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/pool"
 	"github.com/code-to-go/safepool/security"
+	"github.com/code-to-go/safepool/services/chat"
+	"github.com/code-to-go/safepool/services/invite"
+	"github.com/code-to-go/safepool/services/library"
 	"github.com/code-to-go/safepool/sql"
 	"github.com/patrickmn/go-cache"
 )

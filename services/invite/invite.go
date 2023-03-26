@@ -12,10 +12,10 @@ import (
 	"io"
 	"strings"
 
-	"github.com/code-to-go/safepool/apps/common"
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/pool"
 	"github.com/code-to-go/safepool/security"
+	"github.com/code-to-go/safepool/services/common"
 	"github.com/godruoyi/go-snowflake"
 )
 

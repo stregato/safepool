@@ -20,10 +20,10 @@ import (
 	"time"
 
 	"github.com/code-to-go/safepool/api"
-	"github.com/code-to-go/safepool/apps/chat"
 	"github.com/code-to-go/safepool/core"
 	"github.com/code-to-go/safepool/pool"
 	"github.com/code-to-go/safepool/security"
+	"github.com/code-to-go/safepool/services/chat"
 	"github.com/sirupsen/logrus"
 	"github.com/skratchdot/open-golang/open"
 )
