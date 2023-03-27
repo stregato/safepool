@@ -325,12 +325,12 @@ CREATE TABLE IF NOT EXISTS reels (
     pool VARCHAR(256) NOT NULL,
     reel VARCHAR(256) NOT NULL,
     thread VARCHAR(256) NOT NULL,
-    id INTEGER NOT NULL
+    id INTEGER NOT NULL,
     name VARCHAR(256) NOT NULL,
     author VARCHAR(128),
     contentType VARCHAR(64),
     ctime INTEGER NOT NULL,
-    thumbnail BLOB NOT NULL
+    thumbnail BLOB NOT NULL,
     CONSTRAINT pk_reels PRIMARY KEY(pool,reel,thread,id)
 );
 
@@ -345,5 +345,5 @@ INSERT INTO reels(pool,reel,thread,id,name,author,contentType,ctime,thumbnail)
 SELECT DISTINCT thread FROM reels WHERE pool=:pool AND reel=:reel
 
 -- GET_REEL
-SELECT id,name,contentType,ctime,thumnail FROM reels WHERE pool=:pool AND reel=:reel 
+SELECT id,name,contentType,ctime,thumbnail FROM reels WHERE pool=:pool AND reel=:reel 
     AND thread=:thread AND ctime>:from AND ctime<:to
