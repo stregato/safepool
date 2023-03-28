@@ -7,16 +7,18 @@ linux-x86_64:
 	go build -buildmode=c-shared -tags linux -o $(LINUX_OUT)/amd64/libsafepool.so
 
 MAC_OUT=../caspian/macos/libs
-mac-x86_64:
+macos-x86_64:
 	CGO_ENABLED=1 \
 	GOOS=darwin \
 	GOARCH=amd64 \
 	go build -buildmode=c-shared -tags macos -o $(MAC_OUT)/amd64/libsafepool.dylib
-mac-arm_64:
+macos-arm_64:
 	CGO_ENABLED=1 \
 	GOOS=darwin \
 	GOARCH=arm64 \
 	go build -buildmode=c-shared -tags macos -o $(MAC_OUT)/arm64/libsafepool.dylib
+macos: macos-x86_64 macos-arm_64
+	lipo $(MAC_OUT)/amd64/libsafepool.dylib $(MAC_OUT)/arm64/libsafepool.dylib -create -output $(MAC_OUT)/libsafepool.dylib
 
 IOS_OUT=../caspian/ios
 ios-arm64:
@@ -77,4 +79,3 @@ android-x86_64:
 #android: android-armv7a android-arm64 android-x86 android-x86_64
 android: android-arm64 android-x86_64
 linux: linux-x86_64
-mac: mac-x86_64

@@ -52,7 +52,7 @@ func Start(dbPath string, availableBandwith pool.Bandwidth) error {
 	})
 
 	err := sql.OpenDB(dbPath)
-	if core.IsErr(err, "cannot open DB: %v") {
+	if core.IsErr(err, "cannot open DB '%s': %v", dbPath) {
 		return err
 	}
 
