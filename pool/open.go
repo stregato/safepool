@@ -49,7 +49,7 @@ func Open(self security.Identity, name string) (*Pool, error) {
 	}
 	p.ExportSelf(false)
 
-	err = p.SyncAccess()
+	err = p.SyncAccess(false)
 	if core.IsErr(err, "cannot sync access: %v") {
 		return nil, err
 	}

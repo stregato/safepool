@@ -56,7 +56,7 @@ func Create(self security.Identity, name string, apps []string) (*Pool, error) {
 		return nil, err
 	}
 
-	err = p.SyncAccess()
+	err = p.SyncAccess(true)
 	if core.IsErr(err, "cannot sync access: %v") {
 		return nil, err
 	}

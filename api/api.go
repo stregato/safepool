@@ -255,7 +255,7 @@ func PoolInvite(name string, ids []string, invitePool string) (string, error) {
 			return "", err
 		}
 	}
-	p.SyncAccess()
+	p.SyncAccess(true)
 
 	i := invite.Invite{
 		Sender:       p.Self,

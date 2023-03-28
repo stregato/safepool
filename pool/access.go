@@ -70,7 +70,6 @@ func (p *Pool) SetAccess(userId string, state State) error {
 	if core.IsErr(err, "cannot link identity '%s' to pool '%s': %v", userId, p.Name) {
 		return err
 	}
-	p.touchGuard(accessFolder, touchFile)
 
 	return err
 }
@@ -93,12 +92,12 @@ func (p *Pool) exportSelf(e storage.Storage, force bool) error {
 		return err
 	}
 
-	p.touchGuard(identityFolder, touchFile)
+	p.touchGuard(e, identityFolder, touchFile)
 	return nil
 }
 
 func (p *Pool) syncIdentities(e storage.Storage) error {
-	if p.checkGuard(identityFolder, touchFile) {
+	if p.checkGuard(e, identityFolder, touchFile) {
 		return nil
 	}
 
@@ -121,28 +120,28 @@ func (p *Pool) syncIdentities(e storage.Storage) error {
 	return nil
 }
 
-func (p *Pool) syncSecondaryExchanges() {
+func (p *Pool) syncSecondaryExchanges(ignoreGuard bool) {
 	p.mutex.Lock()
 	for _, e := range p.exchangers {
 		if e != p.e {
-			err := p.syncAccessFor(e)
+			err := p.syncAccessFor(e, ignoreGuard)
 			core.IsErr(err, "cannot synchronize secondary exchange '%s': %v", e.String())
 		}
 	}
 	p.mutex.Unlock()
 }
 
-func (p *Pool) SyncAccess() error {
-	err := p.syncAccessFor(p.e)
+func (p *Pool) SyncAccess(ignoreGuard bool) error {
+	err := p.syncAccessFor(p.e, ignoreGuard)
 	if core.IsErr(err, "cannot sync privary exchange '%s': %v", p.e.String()) {
 		return err
 	}
-	go p.syncSecondaryExchanges()
+	go p.syncSecondaryExchanges(ignoreGuard)
 
 	return err
 }
 
-func (p *Pool) syncAccessFor(e storage.Storage) error {
+func (p *Pool) syncAccessFor(e storage.Storage, ignoreGuard bool) error {
 
 	core.Info("sync access for %s", e.String())
 	err := p.syncIdentities(e)
@@ -150,7 +149,7 @@ func (p *Pool) syncAccessFor(e storage.Storage) error {
 		return err
 	}
 
-	if p.checkGuard(accessFolder, touchFile) {
+	if !ignoreGuard && p.checkGuard(e, accessFolder, touchFile) {
 		core.Info("access checkpoint is recent, skip sync")
 		return nil
 	}
@@ -310,7 +309,7 @@ func (p *Pool) exportAccessFile(e storage.Storage) error {
 	if core.IsErr(err, "cannot write access file '%s': %v", name) {
 		return err
 	}
-	p.touchGuard(accessFolder, ".touch")
+	p.touchGuard(e, accessFolder, ".touch")
 
 	accessFolder := path.Join(p.Name, accessFolder)
 	accessFiles, err := e.ReadDir(accessFolder, 0)

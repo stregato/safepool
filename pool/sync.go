@@ -133,7 +133,7 @@ func (p *Pool) syncFeeds() ([]Head, error) {
 
 func (p *Pool) Sync() ([]Head, error) {
 	if core.Since(p.lastAccessSync) >= SyncAccessFrequency {
-		p.SyncAccess()
+		p.SyncAccess(false)
 		p.lastAccessSync = core.Now()
 	}
 
