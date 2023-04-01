@@ -1,10 +1,18 @@
 
 LINUX_OUT=../caspian/linux/libs
+SNAP_OUT=../caspian/snap/local
 linux-x86_64:
 	CGO_ENABLED=1 \
 	GOOS=linux \
 	GOARCH=amd64 \
 	go build -buildmode=c-shared -tags linux -o $(LINUX_OUT)/amd64/libsafepool.so
+
+snap:
+	go mod tidy
+	CGO_ENABLED=1 \
+	GOOS=linux \
+	GOARCH=amd64 \
+	go build -buildmode=c-shared -tags linux -o $(PREFIX)/libsafepool.so
 
 MAC_OUT=../caspian/macos/libs
 macos-x86_64:
