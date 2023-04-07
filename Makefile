@@ -28,7 +28,7 @@ ios-arm64:
 	SDK=iphoneos \
 	CC=$(shell go env GOROOT)/misc/ios/clangwrap.sh \
 	CGO_CFLAGS="-fembed-bitcode" \
-	go build -buildmode=c-archive -tags ios -o $(IOS_OUT)/arm64.a 
+	go build -buildmode=c-archive -tags ios -o $(IOS_OUT)/arm64.so 
 
 ios-x86_64:
 	CGO_ENABLED=1 \
@@ -36,10 +36,10 @@ ios-x86_64:
 	GOARCH=amd64 \
 	SDK=iphonesimulator \
 	CC=$(PWD)/clangwrap.sh \
-	go build -buildmode=c-archive -tags ios -o $(IOS_OUT)/x86_64.a
+	go build -buildmode=c-archive -tags ios -o $(IOS_OUT)/x86_64.so
 
 ios: ios-arm64 ios-x86_64
-	lipo $(IOS_OUT)/x86_64.a $(IOS_OUT)/arm64.a -create -output $(IOS_OUT)/safepool.a
+	lipo $(IOS_OUT)/x86_64.so $(IOS_OUT)/arm64.so -create -output $(IOS_OUT)/safepool.dylib
 	cp $(IOS_OUT)/arm64.h $(IOS_OUT)/safepool.h
 
 ANDROID_OUT=../caspian/android/app/src/main/jniLibs
