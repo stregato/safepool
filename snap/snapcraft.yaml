@@ -20,7 +20,7 @@ parts:
       - go
     plugin: go
     override-build: | 
-      go build -buildmode=c-shared -tags linux -o $SNAPCRAFT_PART_INSTALL/bin/lib/libsafepool.so
+      go build -buildmode=c-shared -tags linux -o $SNAPCRAFT_PART_INSTALL/usr/lib/libsafepool.so
     stage-packages: 
       - libavcodec-dev
       - libavutil-dev
