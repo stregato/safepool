@@ -1,0 +1,28 @@
+name: safepool
+version: 0.1.0
+summary: Basic snap image for safepool
+description: Snap image
+confinement: strict
+base: core22
+grade: stable
+    
+parts:   
+  safepool:
+    source: .
+    build-packages:
+      - build-essential 
+      - pkg-config
+      - libavcodec-dev
+      - libavutil-dev
+      - libavformat-dev
+      - libswscale-dev
+    build-snaps:
+      - go
+    plugin: go
+    override-build: | 
+      go build -buildmode=c-shared -tags linux -o $SNAPCRAFT_PART_INSTALL/usr/lib/libsafepool.so
+    stage-packages: 
+      - libavcodec-dev
+      - libavutil-dev
+      - libavformat-dev
+      - libswscale-dev

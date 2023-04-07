@@ -88,11 +88,36 @@ typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;
 extern "C" {
 #endif
 
-extern Result start();
+extern Result start(char* dbPath, char* cachePath, char* availableBandwith);
 extern Result stop();
-extern Result getSelfId();
-extern Result getSelf();
-extern Result getPoolList();
+extern Result factoryReset();
+extern Result securitySelfId();
+extern Result securityGetSelf();
+extern Result securitySetSelf(char* identity);
+extern Result securityIdentityFromId(char* id);
+extern Result poolList();
+extern Result poolCreate(char* config, char* apps);
+extern Result poolJoin(char* token);
+extern Result poolLeave(char* name);
+extern Result poolSub(char* name, char* sub, char* idsList, char* appsList);
+extern Result poolInvite(char* poolName, char* idsList, char* invitePool);
+extern Result poolGet(char* name);
+extern Result poolUsers(char* poolName);
+extern Result poolParseInvite(char* token);
+extern Result chatReceive(char* poolName, long int after, long int before, int limit, char* private);
+extern Result chatSend(char* poolName, char* contentType, char* text, char* binary, char* private);
+extern Result chatPrivates(char* poolName);
+extern Result libraryList(char* poolName, char* folder);
+extern Result libraryFind(char* poolName, long int id);
+extern Result libraryReceive(char* poolName, long int id, char* localPath);
+extern Result librarySave(char* poolName, long int id, char* localPath);
+extern Result librarySend(char* poolName, char* localPath, char* name, int solveConflicts, char* tagsList);
+extern Result inviteReceive(char* poolName, int after, int onlyMine);
+extern Result notifications(long int ctime);
+extern Result fileOpen(char* filePath);
+extern Result dump();
+extern Result setLogLevel(int level);
+extern Result setAvailableBandwidth(char* availableBandwidth);
 
 #ifdef __cplusplus
 }
