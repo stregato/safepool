@@ -31,7 +31,7 @@ func (p *Pool) readHead(e storage.Storage, name string) (Head, error) {
 	}
 
 	if !security.Verify(h.AuthorId, h.Hash, h.Signature) {
-		return Head{}, ErrNoExchange
+		return Head{}, ErrNoStorage
 	}
 
 	return h, err

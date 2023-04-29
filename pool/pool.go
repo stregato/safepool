@@ -27,7 +27,7 @@ var HouseKeepingPeriods = map[Bandwidth]time.Duration{
 	HighBandwith:    5 * time.Minute,
 }
 
-var ErrNoExchange = errors.New("no Exchange available")
+var ErrNoStorage = errors.New("no Storage available")
 var ErrNotTrusted = errors.New("the author is not a trusted user")
 var ErrNotAuthorized = errors.New("no authorization for this file")
 var ErrAlreadyExist = errors.New("pool already exists")

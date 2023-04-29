@@ -41,6 +41,8 @@ func SetDbName(dbName string) {
 	sql.DbPath = dbName
 }
 
+// Start initializes the library using the provided dbPath and availableBandwidth. It creates a new db when dbPath is
+// not an existing file.
 func Start(dbPath string, availableBandwith pool.Bandwidth) error {
 	sql.InitDDL = sqlliteDDL
 	pool.AvailableBandwidth = availableBandwith
@@ -77,6 +79,7 @@ func Start(dbPath string, availableBandwith pool.Bandwidth) error {
 	return err
 }
 
+// Stop closes the DB and it releases all connected pools
 func Stop() error {
 	pools.Flush()
 	err := sql.CloseDB()
@@ -84,6 +87,7 @@ func Stop() error {
 	return err
 }
 
+// FactoryReset deletes and recreates the DB. It is useful during development to recover from inconsistent data and structure.
 func FactoryReset() error {
 	err := Stop()
 	core.IsErr(err, "cannot stop application: %v")

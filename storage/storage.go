@@ -66,6 +66,10 @@ func OpenStorage(connectionUrl string) (Storage, error) {
 		return OpenS3(connectionUrl)
 	case strings.HasPrefix(connectionUrl, "file:/"):
 		return OpenLocal(connectionUrl)
+	case strings.HasPrefix(connectionUrl, "dav://"):
+		return OpenWebDAV(connectionUrl)
+	case strings.HasPrefix(connectionUrl, "davs://"):
+		return OpenWebDAV(connectionUrl)
 	}
 
 	return nil, core.ErrNoDriver

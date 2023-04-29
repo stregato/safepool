@@ -48,7 +48,9 @@ func (p *Pool) startReplica() {
 	}()
 }
 func (p *Pool) stopReplica() {
-	p.quitReplica <- true
+	if p.quitReplica != nil {
+		p.quitReplica <- true
+	}
 }
 
 func (p *Pool) replica() {

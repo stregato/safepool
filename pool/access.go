@@ -166,7 +166,7 @@ func (p *Pool) syncAccessFor(e storage.Storage, ignoreGuard bool) error {
 	case 1:
 		keyId := sources[0].MasterKeyId
 		keyValue := p.keyFunc(keyId)
-		p.sqlSetMasterKey(keyId, p.masterKeyId)
+		p.sqlSetMasterKey(keyId)
 		if core.IsErr(err, "cannot set master key for id '%d': %v", keyId) {
 			return err
 		}
@@ -369,10 +369,10 @@ func (p *Pool) updateMasterKey() error {
 	keyId := snowflake.ID()
 	key := security.GenerateBytesKey(32)
 	err := p.sqlSetKey(keyId, key)
-	if core.IsErr(err, "çannot store master encryption key to db: %v") {
+	if core.IsErr(err, "cannot store master encryption key to db: %v") {
 		return err
 	}
-	p.sqlSetMasterKey(keyId, p.masterKeyId)
+	err = p.sqlSetMasterKey(keyId)
 	if core.IsErr(err, "cannot set master key for id '%d': %v", keyId) {
 		return err
 	}

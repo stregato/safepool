@@ -22,7 +22,7 @@ func Open(self security.Identity, name string) (*Pool, error) {
 		Name:          name,
 		Self:          self,
 		Apps:          config.Apps,
-		LifeSpanHours: config.LifeSpanHours,
+		LifeSpanHours: core.If(config.LifeSpanHours > 0, config.LifeSpanHours, 24*30),
 
 		lastAccessSync: core.Now(),
 		lastReplica:    core.Now(),

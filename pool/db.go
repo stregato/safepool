@@ -109,8 +109,8 @@ func (p *Pool) sqlGetMasterKey() (keyId uint64, keyValue []byte, err error) {
 	return keyId, keyValue, nil
 }
 
-func (p *Pool) sqlSetMasterKey(keyId, oldKeyId uint64) error {
-	_, err := sql.Exec("SET_MASTER_KEY", sql.Args{"pool": p.Name, "keyId": keyId, "oldKeyId": oldKeyId})
+func (p *Pool) sqlSetMasterKey(keyId uint64) error {
+	_, err := sql.Exec("SET_MASTER_KEY", sql.Args{"pool": p.Name, "keyId": keyId})
 	core.IsErr(err, "cannot set master key: %v")
 	return err
 }

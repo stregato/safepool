@@ -83,7 +83,7 @@ func (p *Pool) connectSafe(config Config) error {
 	p.findPrimary()
 	if p.e == nil {
 		logrus.Warnf("no available exchange for domain %s", p.Name)
-		return ErrNoExchange
+		return ErrNoStorage
 	} else {
 		p.Connection = p.e.String()
 		return nil

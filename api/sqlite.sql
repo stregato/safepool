@@ -111,13 +111,13 @@ INSERT INTO keys(pool,keyId,keyValue) VALUES(:pool,:keyId,:keyValue)
 	    WHERE pool=:pool AND keyId=:keyId
 
 -- DELETE_KEYS_SMALLER
-DELETE FROM keys WHERE pool=:pool AND keyId < :smallerThan
+DELETE FROM keys WHERE pool=:pool AND keyId < :smallerThan AND NOT master
 
 -- DELETE_KEYS
 DELETE FROM keys WHERE pool=:pool
 
 -- SET_MASTER_KEY
-UPDATE keys SET master = CASE keyId WHEN :keyId THEN 1 ELSE 0 END WHERE pool=:pool AND keyId=:keyId OR keyId=:oldKeyId
+UPDATE keys SET master = CASE WHEN keyId=:keyId THEN 1 ELSE 0 END WHERE pool=:pool
 
 -- GET_MASTER_KEY
 SELECT keyId, keyValue FROM keys WHERE pool=:pool AND master

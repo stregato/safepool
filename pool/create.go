@@ -25,6 +25,7 @@ func Create(self security.Identity, name string, apps []string) (*Pool, error) {
 		Name:           name,
 		Id:             snowflake.ID(),
 		Self:           self,
+		LifeSpanHours:  core.If(config.LifeSpanHours > 0, config.LifeSpanHours, 24*30),
 		lastAccessSync: core.Now(),
 		lastReplica:    core.Now(),
 	}
