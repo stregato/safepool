@@ -1,5 +1,6 @@
 
-OUT=../libs
+OUT=$(PWD)/dist
+CASPIAN=$(PWD)/../caspian
 
 linux-x86_64:
 	CGO_ENABLED=1 \
@@ -8,41 +9,54 @@ linux-x86_64:
 	go build -buildmode=c-shared -tags linux -o $(OUT)/linux/libsafepool.so
 linux: linux-x86_64
 
-MAC_OUT=../caspian/macos/libs
 macos-x86_64:
 	CGO_ENABLED=1 \
 	GOOS=darwin \
 	GOARCH=amd64 \
-	go build -buildmode=c-shared -tags macos -o $(OUT)/macos/x86_64.dylib
+	go build -buildmode=c-shared -tags macos -o $(OUT)/macos/x86/libsafepool.dylib
 macos-arm_64:
 	CGO_ENABLED=1 \
 	GOOS=darwin \
 	GOARCH=arm64 \
-	go build -buildmode=c-shared -tags macos -o $(OUT)/macos/arm64.dylib
+	go build -buildmode=c-shared -tags macos -o $(OUT)/macos/arm64/libsafepool.dylib
 macos: macos-x86_64 macos-arm_64
-	lipo $(OUT)/mac/arm64.dylib $(OUT)/mac/amd64.dylib -create -output $(OUT)/macos/libsafepool.dylib
+	lipo $(OUT)/macos/x86/libsafepool.dylib $(OUT)/macos/arm64/libsafepool.dylib -create -output $(OUT)/macos/libsafepool.dylib
+	rm -rf $(OUT)/macos/x86 $(OUT)/macos/arm64
+	test -e $(CASPIAN) && cp -rf $(OUT)/macos $(CASPIAN)
 
-IOS_OUT=../caspian/ios
 ios-arm64:
 	CGO_ENABLED=1 \
-	GOOS=darwin \
+	GOOS=ios \
 	GOARCH=arm64 \
 	SDK=iphoneos \
+	SDK_PATH=`xcrun --sdk iphoneos --show-sdk-path` \
 	CC=$(shell go env GOROOT)/misc/ios/clangwrap.sh \
 	CGO_CFLAGS="-fembed-bitcode" \
-	go build -buildmode=c-archive -tags ios -o $(OUT)/ios/arm64.so 
+	CLANG=`xcrun --sdk iphoneos --find clang` \
+	go build -buildmode=c-archive -tags ios -o $(OUT)/ios/arm64/safepool.a 
 
 ios-x86_64:
 	CGO_ENABLED=1 \
-	GOOS=darwin \
+	GOOS=ios \
 	GOARCH=amd64 \
 	SDK=iphonesimulator \
+	SDK_PATH=`xcrun --sdk iphonesimulator --show-sdk-path` \
 	CC=$(PWD)/clangwrap.sh \
-	go build -buildmode=c-archive -tags ios -o $(OUT)/ios/x86_64.so
+	CLANG=`xcrun --sdk iphonesimulator --find clang` \
+	go build -buildmode=c-archive -tags ios -o $(OUT)/ios/x86/safepool.a
 
 ios: ios-arm64 ios-x86_64
-	lipo $(OUT)/ios/x86_64.so $(OUT)/ios/arm64.so -create -output $(OUT)/ios/safepool.so
-	cp $(OUT)/ios/arm64.h $(OUT)/ios/safepool.h
+#	lipo $(OUT)/ios/arm64/libsafepool.a $(OUT)/ios/x86/libsafepool.a -create -output $(OUT)/ios/libsafepool.a
+	rm -rf $(OUT)/ios/Safepool.xcframework
+	xcodebuild -create-xcframework \
+    -output $(OUT)/ios/Safepool.xcframework \
+    -library $(OUT)/ios/arm64/safepool.a \
+    -headers $(OUT)/ios/arm64/safepool.h \
+    -library $(OUT)/ios/x86/safepool.a  \
+    -headers $(OUT)/ios/x86/safepool.h
+	rm -r $(OUT)/ios/arm64
+	rm -r $(OUT)/ios/x86
+	test -e $(CASPIAN) && cp -rf $(OUT)/ios $(CASPIAN)
 
 ANDROID_OUT=../caspian/android/app/src/main/jniLibs
 ANDROID_SDK=$(HOME)/Android/Sdk
@@ -81,7 +95,7 @@ android-x86_64:
 #android: android-armv7a android-arm64 android-x86 android-x86_64
 android: android-arm64 android-x86_64
 
-SNAP_OUT=../caspian/snap/local
+SNAP_OUT=$(CASPIAN)/snap/local
 snap:
 	go mod tidy
 	CGO_ENABLED=1 \
@@ -90,12 +104,6 @@ snap:
 	go build -buildmode=c-shared -tags linux -o $(PREFIX)/libsafepool.so
 
 caspian:
-	mkdir -p $(CASPIAN)/linux/libs
-	mkdir -p $(CASPIAN)/macos/libs
-	mkdir -p $(CASPIAN)/android/arm64-v8a
-	mkdir -p $(CASPIAN)/android/x86_64
-
-	test -e $(OUT)/linux/libsafepool.so && cp $(OUT)/linux/libsafepool.so $(CASPIAN)/linux/libs
-	test -e $(OUT)/macos/libsafepool.dylib && cp $(OUT)/macos/libsafepool.dylib $(CASPIAN)/macos/libs
+	test -e $(CASPIAN) && cp -rf $(OUT)/* $(CASPIAN)
 
 	
