@@ -9,6 +9,13 @@ linux-x86_64:
 	go build -buildmode=c-shared -tags linux -o $(OUT)/linux/libsafepool.so
 linux: linux-x86_64
 
+windows:
+	CGO_ENABLED=1 \
+	CC=x86_64-w64-mingw32-gcc \
+	GOOS=windows \
+	GOARCH=amd64 \
+	go build -buildmode=c-shared -tags windows -o $(OUT)/windows/safepool.dll
+
 macos-x86_64:
 	CGO_ENABLED=1 \
 	GOOS=darwin \
@@ -57,6 +64,8 @@ ios: ios-arm64 ios-x86_64
 	rm -r $(OUT)/ios/arm64
 	rm -r $(OUT)/ios/x86
 	test -e $(CASPIAN) && cp -rf $(OUT)/ios $(CASPIAN)
+
+apple: macos ios
 
 ANDROID_OUT=../caspian/android/app/src/main/jniLibs
 ANDROID_SDK=$(HOME)/Android/Sdk
